@@ -1,0 +1,12 @@
+2026-04-24 20:50:36.329 Did not auto detect external IP.
+Please go to https://docs.streamlit.io/ for debugging hints.
+C:\Users\manoj\anaconda3\Lib\site-packages\pandas\core\arrays\masked.py:60: UserWarning: Pandas requires version '1.3.6' or newer of 'bottleneck' (version '1.3.5' currently installed).
+  from pandas.core import (
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+2026-04-24 21:13:15.373 Uncaught app exception
+Traceback (most recent call last):
+  File "C:\Users\manoj\anaconda3\Lib\site-packages\streamlit\runtime\scriptrunner\script_runner.py", line 542, in _run_script
+    exec(code, module.__dict__)
+  File "C:\Users\manoj\OneDrive\cpp\Desktop\AI_Gym_Project-2\AI_Gym_Project\app.py", line 18, in <module>
+    from m import inject_custom_css
+ModuleNotFoundError: No module named 'm'
