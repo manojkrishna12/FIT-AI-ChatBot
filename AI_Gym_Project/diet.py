@@ -24,9 +24,41 @@ from storage import append_session_history, save_current_user_state
 
 
 import json
+import re
 
-def ai_diet_plan(user_data: dict, model=None) -> str | dict:
-    """Generate a 7-day diet plan using JSON structure."""
+def extract_and_parse_json(text: str):
+    """Robustly extract and parse JSON from a response, handling markdown fences."""
+    text = text.strip()
+    if "```json" in text:
+        text = text.split("```json")[1].split("```")[0]
+    elif "```" in text:
+        text = text.split("```")[1].split("```")[0]
+    try:
+        return json.loads(text.strip())
+    except json.JSONDecodeError:
+        # Fallback for common trailing comma issue
+        text = re.sub(r',\\s*([}\\]])', r'\\1', text)
+        try:
+            return json.loads(text.strip())
+        except json.JSONDecodeError:
+            return None
+
+def contains_allergy(plan_data: dict, allergies: str) -> bool:
+    """Check if any generated meal items contain the user's avoided foods."""
+    if not allergies or allergies.lower() == "none" or not plan_data:
+        return False
+    avoid_list = [a.strip().lower() for a in allergies.split(",") if a.strip()]
+    
+    for day in plan_data.get("days", []):
+        for meal in day.get("meals", []):
+            items_str = meal.get("items", "").lower()
+            for avoid in avoid_list:
+                if avoid in items_str:
+                    return True
+    return False
+
+def ai_diet_plan(user_data: dict, model=None, is_retry=False) -> dict | str | None:
+    """Generate a 7-day diet plan using JSON structure, with 1 retry on failure."""
     prompt = f"""
 You are a certified nutritionist.
 Create a practical 7-day meal plan for:
@@ -72,15 +104,27 @@ Respond ONLY with a valid JSON object in the following format (do not include ma
 }}
 Do not calculate daily totals in the JSON, the application will do that.
 """
+    if is_retry:
+        prompt += "\\n\\nPREVIOUS ATTEMPT FAILED (Allergy included or invalid JSON). You MUST STRICTLY OMIT ALLERGIES AND OUTPUT VALID JSON."
+
     try:
         response_text = get_gemini_response(prompt, model)
-        if response_text.startswith("```json"):
-            response_text = response_text[7:-3]
-        elif response_text.startswith("```"):
-            response_text = response_text[3:-3]
-        return json.loads(response_text.strip())
+        plan_data = extract_and_parse_json(response_text)
+        
+        if plan_data is None:
+            if not is_retry:
+                return ai_diet_plan(user_data, model, is_retry=True)
+            return None
+            
+        if contains_allergy(plan_data, user_data['allergies']):
+            if not is_retry:
+                return ai_diet_plan(user_data, model, is_retry=True)
+            return None
+            
+        return plan_data
     except Exception as e:
-        return f"Error parsing AI response: {e}"
+        print(f"[Dietician] AI Error: {e}")
+        return None
 
 
 def ai_grocery_list(meal_plan: str, model=None) -> str:
@@ -97,9 +141,15 @@ CRITICAL:
 3. End with 2 practical shopping tips.
 """
     try:
-        return get_gemini_response(prompt, model)
+        resp = get_gemini_response(prompt, model)
+        if "Add a Gemini API key" in resp or "Error" in resp:
+            # Deterministic fallback if API fails
+            fallback = ["**Fallback Grocery List (Generated from items)**"]
+            return "\\n".join(fallback) + "\\n\\nPlease configure API key for intelligent grouping."
+        return resp
     except Exception as e:
-        return f"Error generating grocery list: {e}"
+        print(f"[Dietician] Grocery List Error: {e}")
+        return "AI service is temporarily unavailable. Please try again in a moment."
 
 
 def ai_meal_analysis(meal_description: str, model=None) -> str:
@@ -121,9 +171,13 @@ Return a structured markdown response with:
 CRITICAL: Clearly state at the beginning that these are AI-estimated values and may not be 100% accurate.
 """
     try:
-        return get_gemini_response(prompt, model)
+        resp = get_gemini_response(prompt, model)
+        if "Add a Gemini API key" in resp or "Error" in resp:
+            return resp
+        return resp
     except Exception as e:
-        return f"Error generating meal analysis: {e}"
+        print(f"[Dietician] Meal Analysis Error: {e}")
+        return "AI service is temporarily unavailable. Please try again in a moment."
 
 
 def ai_nutrition_tip(goal: str, model=None) -> str:
@@ -175,10 +229,10 @@ def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int
         
         md.append("---")
         md.append(f"**Daily Totals (Calculated by App from AI estimates)**:")
-        md.append(f"- **Calories**: {daily_cal} kcal *(Target: {target_cal})*")
-        md.append(f"- **Protein**: {daily_p}g *(Target: {target_p}g)*")
-        md.append(f"- **Carbs**: {daily_c}g *(Target: {target_c}g)*")
-        md.append(f"- **Fat**: {daily_f}g *(Target: {target_f}g)*")
+        md.append(f"- **Target Calories**: {target_cal} kcal | **Planned**: {daily_cal} kcal | **Difference**: {daily_cal - target_cal} kcal")
+        md.append(f"- **Target Protein**: {target_p} g | **Planned Protein**: {daily_p} g | **Difference**: {daily_p - target_p} g")
+        md.append(f"- **Target Carbs**: {target_c} g | **Planned Carbs**: {daily_c} g | **Difference**: {daily_c - target_c} g")
+        md.append(f"- **Target Fat**: {target_f} g | **Planned Fat**: {daily_f} g | **Difference**: {daily_f - target_f} g")
         md.append("---")
     
     return "\\n".join(md)
@@ -314,6 +368,10 @@ def render_diet_page() -> None:
 
             with st.spinner("Building your personalised 7-day meal plan..."):
                 plan_data = ai_diet_plan(user_data, model)
+                
+            if plan_data is None:
+                st.error("AI response could not be processed. Please try again in a moment.")
+                st.stop()
                 
             if isinstance(plan_data, dict):
                 plan_md = format_json_plan_to_markdown(

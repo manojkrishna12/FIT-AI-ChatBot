@@ -23,10 +23,32 @@ from constants import (
 
 
 @st.cache_resource(show_spinner=False)
-def _cached_gemini_model(api_key: str, model_name: str) -> genai.GenerativeModel:
-    """Create and cache a Gemini model instance per API key."""
+def _cached_gemini_model(api_key: str) -> genai.GenerativeModel:
+    """Create and cache a Gemini model instance dynamically based on availability."""
     genai.configure(api_key=api_key)
-    return genai.GenerativeModel(model_name)
+    
+    # Dynamically select the best available model
+    best_model = "gemini-pro"  # Default fallback
+    try:
+        available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
+        
+        # Priority 1: gemini-1.5-flash
+        flash_models = [m for m in available_models if "1.5-flash" in m.lower()]
+        if flash_models:
+            best_model = flash_models[0]
+        else:
+            # Priority 2: any pro model
+            pro_models = [m for m in available_models if "pro" in m.lower()]
+            if pro_models:
+                best_model = pro_models[0]
+            elif available_models:
+                best_model = available_models[0]
+        
+        print(f"[Dietician] Selected Gemini model: {best_model}")
+    except Exception as e:
+        print(f"[Dietician] Warning: Could not list Gemini models. Defaulting to {best_model}. Error: {e}")
+        
+    return genai.GenerativeModel(best_model)
 
 
 def initialize_gemini() -> genai.GenerativeModel | None:
@@ -38,7 +60,7 @@ def initialize_gemini() -> genai.GenerativeModel | None:
             icon="🔑",
         )
         return None
-    return _cached_gemini_model(key, GEMINI_MODEL)
+    return _cached_gemini_model(key)
 
 
 def get_gemini_response(prompt: str, model: genai.GenerativeModel | None = None) -> str:

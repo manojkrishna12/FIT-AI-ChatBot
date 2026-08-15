@@ -493,12 +493,12 @@ def render_gym_trainer_page() -> None:
                 res = process_image(img_bgr, exercise)
 
             c1, c2 = st.columns(2)
-            c1.image(pil_img, caption="Original", use_container_width=True)
+            c1.image(pil_img, caption="Original", width="stretch")
             if res["annotated"] is not None:
                 c2.image(
                     cv2.cvtColor(res["annotated"], cv2.COLOR_BGR2RGB),
                     caption="Pose Detected",
-                    use_container_width=True,
+                    width="stretch",
                 )
 
             if res["pose_detected"]:
@@ -559,7 +559,7 @@ def render_gym_trainer_page() -> None:
                 cols = st.columns(len(vres["sample_frames"]))
                 labels = ["Start", "Middle", "End"]
                 for col, frame, lbl in zip(cols, vres["sample_frames"], labels):
-                    col.image(frame, caption=lbl, use_container_width=True)
+                    col.image(frame, caption=lbl, width="stretch")
 
             if vres["rep_count"] == 0:
                 st.warning(
