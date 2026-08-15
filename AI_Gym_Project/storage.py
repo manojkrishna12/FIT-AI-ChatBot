@@ -74,7 +74,6 @@ def _default_user_state(user_id: str) -> dict[str, Any]:
     """Return the default persisted shape for a new user."""
     return {
         "user_id": user_id,
-        "chat_history": [],
         "habit": {
             "streak_days": 0,
             "last_checkin_date": None,
@@ -155,7 +154,6 @@ def ensure_user_state_loaded() -> None:
 
     state = load_user_state(user_id)
     st.session_state["active_user_id"] = user_id
-    st.session_state["chat_history"] = list(state["chat_history"])
     st.session_state["streak_days"] = state["habit"]["streak_days"]
     st.session_state["last_checkin_date"] = state["habit"]["last_checkin_date"]
     st.session_state["checkin_done_today"] = state["habit"]["checkin_done_today"]
@@ -185,7 +183,6 @@ def save_current_user_state() -> bool:
 
     payload = {
         "user_id": user_id,
-        "chat_history": list(st.session_state.get("chat_history", []))[-40:],
         "habit": {
             "streak_days": int(st.session_state.get("streak_days", 0)),
             "last_checkin_date": last_checkin,

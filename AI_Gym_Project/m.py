@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 
-import google.generativeai as genai
+from google import genai
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -23,36 +23,13 @@ from constants import (
 
 
 @st.cache_resource(show_spinner=False)
-def _cached_gemini_model(api_key: str) -> genai.GenerativeModel:
-    """Create and cache a Gemini model instance dynamically based on availability."""
-    genai.configure(api_key=api_key)
-    
-    # Dynamically select the best available model
-    best_model = "gemini-pro"  # Default fallback
-    try:
-        available_models = [m.name for m in genai.list_models() if "generateContent" in m.supported_generation_methods]
-        
-        # Priority 1: gemini-1.5-flash
-        flash_models = [m for m in available_models if "1.5-flash" in m.lower()]
-        if flash_models:
-            best_model = flash_models[0]
-        else:
-            # Priority 2: any pro model
-            pro_models = [m for m in available_models if "pro" in m.lower()]
-            if pro_models:
-                best_model = pro_models[0]
-            elif available_models:
-                best_model = available_models[0]
-        
-        print(f"[Dietician] Selected Gemini model: {best_model}")
-    except Exception as e:
-        print(f"[Dietician] Warning: Could not list Gemini models. Defaulting to {best_model}. Error: {e}")
-        
-    return genai.GenerativeModel(best_model)
+def _cached_gemini_client(api_key: str) -> genai.Client:
+    """Create and cache a Gemini Client instance."""
+    return genai.Client(api_key=api_key)
 
 
-def initialize_gemini() -> genai.GenerativeModel | None:
-    """Return a cached Gemini model if the API key is configured."""
+def initialize_gemini() -> genai.Client | None:
+    """Return a cached Gemini Client if the API key is configured."""
     key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
     if not key or key == "YOUR_GEMINI_API_KEY_HERE":
         st.warning(
@@ -60,24 +37,117 @@ def initialize_gemini() -> genai.GenerativeModel | None:
             icon="🔑",
         )
         return None
-    return _cached_gemini_model(key)
+    return _cached_gemini_client(key)
 
 
-def get_gemini_response(prompt: str, model: genai.GenerativeModel | None = None) -> str:
-    """Send a prompt to Gemini and return plain text."""
+def get_gemini_response(prompt: str, client: genai.Client | None = None) -> str:
+    """Send a prompt to Gemini and return plain text, safely catching API errors."""
+    
+    import sys
+    import os
+    
+    # 1. TEMPORARILY ADD DIAGNOSTIC LOGGING
+    print("\n" + "="*50)
+    print("[Gemini Debug] Request started")
+    print(f"[Gemini Debug] Python Executable: {sys.executable}")
+    
     try:
-        if model is None:
-            model = initialize_gemini()
-        if model is None:
-            return "Add a Gemini API key in the sidebar to enable AI responses."
-        response = model.generate_content(
-            prompt,
-            request_options={"timeout": GEMINI_REQUEST_TIMEOUT_S},
+        import google.genai as genai_module
+        print(f"[Gemini Debug] SDK: google-genai (Location: {genai_module.__file__})")
+    except Exception as e:
+        print(f"[Gemini Debug] SDK Error: {e}")
+    
+    try:
+        api_key = os.environ.get("GEMINI_API_KEY", "")
+        if not api_key or api_key == "YOUR_GEMINI_API_KEY_HERE":
+            print("[Gemini Debug] API key present: False")
+            return "Please enter a valid Gemini API key in Settings."
+            
+        api_key = api_key.strip()
+        print(f"[Gemini Debug] API key present: True")
+        print(f"[Gemini Debug] API key length: {len(api_key)}")
+        print(f"[Gemini Debug] Model: {GEMINI_MODEL}")
+        
+        if client is None:
+            client = genai.Client(api_key=api_key)
+            
+        # Minimal diagnostic test FIRST
+        print("[Gemini Debug] Running minimal diagnostic test...")
+        test_response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents="Reply with exactly: GEMINI_TEST_OK"
         )
+        print(f"[Gemini Debug] Minimal test response: {test_response.text.strip()}")
+        
+        print("[Gemini Debug] Running actual diet request...")
+        response = client.models.generate_content(
+            model=GEMINI_MODEL,
+            contents=prompt,
+        )
+        
+        print(f"[Gemini Debug] Response received: True")
+        print("[Gemini Debug] SUCCESS")
+        print("="*50 + "\n")
+        
+        if not response or not response.text:
+            print("[Gemini Debug] Warning: response or response.text is empty.")
+            return "Gemini is temporarily unavailable. Please try again in a moment."
+            
         return response.text.strip()
-    except Exception as exc:
-        return f"AI response error: {exc}"
-
+    except Exception as e:
+        print(f"[Gemini Debug] Response received: False")
+        print(f"[Gemini Debug] Exception Type: {type(e).__name__}")
+        print(f"[Gemini Debug] Exact Exception Message: {e}")
+        
+        err_str = str(e).lower()
+        if "404" in err_str or "not found" in err_str:
+            print("[Gemini Debug] 404 MODEL_NOT_FOUND")
+            print(f"[Gemini Debug] Model {GEMINI_MODEL} may be unavailable for this key.")
+            print("[Gemini Debug] Attempting auto-recovery: searching for available models...")
+            try:
+                working_model = None
+                for m in client.models.list():
+                    methods = getattr(m, "supported_generation_methods", [])
+                    if "generateContent" in methods:
+                        name = m.name
+                        if name.startswith("models/"):
+                            name = name.split("/", 1)[1]
+                        if "flash" in name or "pro" in name or "gemini" in name:
+                            working_model = name
+                            break
+                if working_model:
+                    print(f"[Gemini Debug] Found working model: {working_model}. Updating constants.py...")
+                    with open("constants.py", "r", encoding="utf-8") as cf:
+                        c_content = cf.read()
+                    import re
+                    c_content = re.sub(r'GEMINI_MODEL\s*=\s*os\.getenv\("GEMINI_MODEL",\s*"[^"]+"\)', f'GEMINI_MODEL    = os.getenv("GEMINI_MODEL", "{working_model}")', c_content)
+                    with open("constants.py", "w", encoding="utf-8") as cf:
+                        cf.write(c_content)
+                        
+                    print(f"[Gemini Debug] Retrying with {working_model}...")
+                    response = client.models.generate_content(
+                        model=working_model,
+                        contents=prompt,
+                    )
+                    print("[Gemini Debug] Auto-recovery SUCCESS")
+                    print("="*50 + "\n")
+                    return response.text.strip()
+                else:
+                    print("[Gemini Debug] Auto-recovery FAILED: No valid models found.")
+            except Exception as e2:
+                print(f"[Gemini Debug] Auto-recovery Exception: {e2}")
+                
+        elif "401" in err_str or "403" in err_str or "unauthenticated" in err_str or "api key not valid" in err_str:
+            print("[Gemini Debug] 401 INVALID_API_KEY or 403 PERMISSION_DENIED")
+            
+        print("="*50 + "\n")
+        
+        if "401" in err_str or "403" in err_str or "unauthenticated" in err_str or "api key not valid" in err_str:
+            return "Gemini API authentication failed. Please check your API key."
+        elif "404" in err_str or "not found" in err_str:
+            return "The configured Gemini model is unavailable for this API key. Check the terminal for the exact model/API response."
+        else:
+            return "Gemini is temporarily unavailable. Please try again in a moment."
 
 def calculate_bmi(weight_kg: float, height_cm: float) -> tuple[float, str]:
     """Return (bmi_value, bmi_category)."""

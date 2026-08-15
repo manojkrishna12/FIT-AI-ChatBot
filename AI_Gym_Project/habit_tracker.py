@@ -9,8 +9,9 @@ from datetime import date, datetime
 
 import streamlit as st
 
-from constants import CHAT_CONTEXT_TURNS, GEMINI_REQUEST_TIMEOUT_S, MOTIVATIONAL_QUOTES
-from m import get_gemini_response, initialize_gemini, page_header
+from constants import CHAT_CONTEXT_TURNS, MOTIVATIONAL_QUOTES
+import requests
+from m import page_header
 from storage import save_current_user_state
 
 
@@ -94,82 +95,103 @@ def sentiment_emoji(sentiment: str) -> str:
     return {"positive": "😊", "negative": "😔", "neutral": "😐"}.get(sentiment, "😐")
 
 
-def chat_with_buddy(user_msg: str, history: list[dict], model=None) -> str:
-    """Generate a FitBot reply using recent conversation context."""
-    if model is None:
-        model = initialize_gemini()
-    if model is None:
-        return "Add a Gemini API key in the sidebar so FitBot can reply."
 
-    context = _BUDDY_SYSTEM + "\n\nConversation so far:\n"
-    for turn in history[-CHAT_CONTEXT_TURNS:]:
-        role = "FitBot" if turn["role"] == "assistant" else "User"
-        context += f"{role}: {turn['content']}\n"
-    context += f"User: {user_msg}\nFitBot:"
-
+def get_openrouter_response(messages: list[dict], api_key: str) -> str:
+    """Call OpenRouter API safely."""
+    print(f"[Gym Buddy] OpenRouter key present: {bool(api_key)}")
+    print(f"[Gym Buddy] OpenRouter key length: {len(api_key) if api_key else 0}")
+    print("[Gym Buddy] Provider: OpenRouter")
+    print("[Gym Buddy] Model: openrouter/free")
+    
+    if not api_key:
+        return "FitBot is unavailable. Please enter your OpenRouter API key."
+        
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": "openrouter/free",
+        "messages": messages,
+    }
+    
     try:
-        response = model.generate_content(
-            context,
-            request_options={"timeout": GEMINI_REQUEST_TIMEOUT_S},
-        )
-        return response.text.strip()
-    except Exception as exc:
-        return f"Connection hiccup: {exc}. Try again in a moment."
+        resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=20)
+        
+        if resp.status_code == 401:
+            return "The OpenRouter API key is invalid or unauthorized."
+        elif resp.status_code == 429:
+            return "The OpenRouter free-model limit has been reached. Please try again later."
+        elif resp.status_code != 200:
+            return "OpenRouter is temporarily unavailable. Please try again."
+            
+        data = resp.json()
+        if "choices" in data and len(data["choices"]) > 0:
+            return data["choices"][0]["message"]["content"]
+        else:
+            return "OpenRouter is temporarily unavailable. Please try again."
+    except Exception:
+        return "OpenRouter is temporarily unavailable. Please try again."
+
+def chat_with_buddy(user_msg: str, history: list[dict]) -> str:
+    """Generate a FitBot reply using recent conversation context."""
+    api_key = st.session_state.get("openrouter_api_key", "").strip()
+    if not api_key:
+        return "FitBot is unavailable. Please enter your OpenRouter API key."
+    
+    # Format messages for OpenRouter (OpenAI-compatible)
+    messages = [{"role": "system", "content": _BUDDY_SYSTEM}]
+    
+    for turn in history[-CHAT_CONTEXT_TURNS:]:
+        messages.append({"role": turn["role"], "content": turn["content"]})
+        
+    messages.append({"role": "user", "content": user_msg})
+
+    return get_openrouter_response(messages, api_key)
 
 
-def ai_daily_challenge(model=None) -> str:
+def ai_daily_challenge() -> str:
     """Generate one short daily challenge."""
-    prompt = """
-Generate one beginner-friendly, equipment-free fitness challenge that takes 10 minutes or less.
-
-Format:
-Challenge: [name]
-Duration: [minutes]
-Task: [1 to 2 sentences]
-Why it helps: [1 sentence]
-Sign-off: [1 motivating sentence]
-"""
-    return get_gemini_response(prompt, model)
+    api_key = st.session_state.get("openrouter_api_key", "").strip()
+    messages = [
+        {"role": "system", "content": _BUDDY_SYSTEM},
+        {"role": "user", "content": "Generate one beginner-friendly, equipment-free fitness challenge that takes 10 minutes or less.\n\nFormat:\nChallenge: [name]\nDuration: [minutes]\nTask: [1 to 2 sentences]\nWhy it helps: [1 sentence]\nSign-off: [1 motivating sentence]"}
+    ]
+    return get_openrouter_response(messages, api_key)
 
 
-def ai_mood_boost(mood: str, model=None) -> str:
+def ai_mood_boost(mood: str) -> str:
     """Return a short motivational response for the current mood."""
-    prompt = f"""
-The user feels "{mood}" about fitness today.
-
-Reply in under 120 words with:
-1. A real acknowledgement of the feeling
-2. One motivating insight
-3. One tiny action they can take right now
-4. One memorable closing line
-
-Write it like a supportive message from a friend.
-"""
-    return get_gemini_response(prompt, model)
+    api_key = st.session_state.get("openrouter_api_key", "").strip()
+    messages = [
+        {"role": "system", "content": _BUDDY_SYSTEM},
+        {"role": "user", "content": f"The user feels '{mood}' about fitness today.\n\nReply in under 120 words with:\n1. A real acknowledgement of the feeling\n2. One motivating insight\n3. One tiny action they can take right now\n4. One memorable closing line\n\nWrite it like a supportive message from a friend."}
+    ]
+    return get_openrouter_response(messages, api_key)
 
 
-def ai_weekly_tip(focus: str, model=None) -> str:
+def ai_weekly_tip(focus: str) -> str:
     """Return one specific practical tip."""
-    prompt = f"""
-Give one expert tip about {focus}.
-Keep it under 80 words, practical, and easy to apply.
-Start with one fitting emoji.
-"""
-    return get_gemini_response(prompt, model)
+    api_key = st.session_state.get("openrouter_api_key", "").strip()
+    messages = [
+        {"role": "system", "content": _BUDDY_SYSTEM},
+        {"role": "user", "content": f"Give one expert tip about {focus}.\nKeep it under 80 words, practical, and easy to apply.\nStart with one fitting emoji."}
+    ]
+    return get_openrouter_response(messages, api_key)
 
 
 def _ensure_welcome_message() -> None:
     """Seed the chat with a welcome message when a user has no history yet."""
-    if st.session_state.get("chat_history"):
-        return
-    welcome = (
-        f"Hey there! 👋 I'm **FitBot** — your personal AI gym buddy. "
-        f"I'm here to help with workouts, nutrition, motivation, and consistency.\n\n"
-        f"Today is **{datetime.now().strftime('%A, %B %d')}**. "
-        f"How are you feeling about your fitness journey today?"
-    )
-    st.session_state["chat_history"] = [{"role": "assistant", "content": welcome}]
-    save_current_user_state()
+    if "chat_history" not in st.session_state:
+        from datetime import datetime
+        welcome = (
+            f"Hey there! 👋 I'm **FitBot** — your personal AI gym buddy. "
+            f"I'm here to help with workouts, nutrition, motivation, and consistency.\n\n"
+            f"Today is **{datetime.now().strftime('%A, %B %d')}**. "
+            f"How are you feeling about your fitness journey today?"
+        )
+        st.session_state["chat_history"] = [{"role": "assistant", "content": welcome}]
 
 
 def render_gym_buddy_page() -> None:
@@ -180,7 +202,6 @@ def render_gym_buddy_page() -> None:
         "Your AI fitness companion: motivator, coach, and friend — all in one",
     )
 
-    model = None
     _ensure_welcome_message()
 
     with st.sidebar:
@@ -188,14 +209,13 @@ def render_gym_buddy_page() -> None:
 
         if st.button("💪 Today's Challenge", use_container_width=True):
             with st.spinner("Getting your challenge..."):
-                challenge = ai_daily_challenge(model)
+                challenge = ai_daily_challenge()
             st.session_state["chat_history"].append(
                 {
                     "role": "assistant",
                     "content": f"Here's your daily challenge. Ready for it?\n\n{challenge}",
                 }
             )
-            save_current_user_state()
             st.rerun()
 
         st.markdown("---")
@@ -213,14 +233,13 @@ def render_gym_buddy_page() -> None:
         selected_mood = st.selectbox("How are you feeling?", mood_options, label_visibility="collapsed")
         if st.button("🚀 Get Mood Boost", use_container_width=True):
             with st.spinner("FitBot is thinking..."):
-                boost = ai_mood_boost(selected_mood, model)
+                boost = ai_mood_boost(selected_mood)
             st.session_state["chat_history"].append(
                 {
                     "role": "assistant",
                     "content": f"I can feel the vibe. Let me help.\n\n{boost}",
                 }
             )
-            save_current_user_state()
             st.rerun()
 
         st.markdown("---")
@@ -237,14 +256,13 @@ def render_gym_buddy_page() -> None:
         selected_tip = st.selectbox("Choose a topic", tip_topics, label_visibility="collapsed")
         if st.button("💡 Get Tip", use_container_width=True):
             with st.spinner("Fetching tip..."):
-                tip = ai_weekly_tip(selected_tip, model)
+                tip = ai_weekly_tip(selected_tip)
             st.session_state["chat_history"].append(
                 {
                     "role": "assistant",
                     "content": f"Here's a tip on **{selected_tip}**:\n\n{tip}",
                 }
             )
-            save_current_user_state()
             st.rerun()
 
         st.markdown("---")
@@ -287,8 +305,7 @@ def render_gym_buddy_page() -> None:
 
         st.markdown("---")
         if st.button("🗑️ Clear Chat", use_container_width=True):
-            st.session_state["chat_history"] = []
-            save_current_user_state()
+            del st.session_state["chat_history"]
             st.rerun()
 
     st.subheader("💬 Chat with FitBot")
@@ -300,7 +317,6 @@ def render_gym_buddy_page() -> None:
     prompt = st.chat_input("Ask anything — workout tips, diet advice, motivation...")
     if prompt:
         st.session_state["chat_history"].append({"role": "user", "content": prompt})
-        save_current_user_state()
 
         with st.chat_message("user", avatar="👤"):
             st.markdown(prompt)
@@ -308,11 +324,10 @@ def render_gym_buddy_page() -> None:
         sentiment = analyze_sentiment(prompt)
         with st.chat_message("assistant", avatar="🤖"):
             with st.spinner("FitBot is typing..."):
-                reply = chat_with_buddy(prompt, st.session_state["chat_history"][:-1], model)
+                reply = chat_with_buddy(prompt, st.session_state["chat_history"][:-1])
             st.markdown(reply)
 
         st.session_state["chat_history"].append({"role": "assistant", "content": reply})
-        save_current_user_state()
 
         if sentiment == "negative" and random.random() < 0.6:
             st.toast(random.choice(MOTIVATIONAL_QUOTES), icon="💪")

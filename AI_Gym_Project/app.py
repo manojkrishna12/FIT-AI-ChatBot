@@ -151,19 +151,39 @@ def build_sidebar() -> str:
         else:
             st.caption("Using the shared `guest` profile until you enter a user id.")
 
-        api_key = st.text_input(
-            "🔑 Gemini API Key",
-            type="password",
-            placeholder="AIza...",
-            help="Free key from https://makersuite.google.com/app/apikey",
-        )
-        if api_key:
-            os.environ["GEMINI_API_KEY"] = api_key
-            st.success("API key saved for this session.")
-        elif os.environ.get("GEMINI_API_KEY", "").startswith("AIza"):
-            st.success("API key already set.")
+        if page == "🤝 Gym Buddy":
+            if "openrouter_api_key" not in st.session_state:
+                st.session_state["openrouter_api_key"] = ""
+                
+            openrouter_key_input = st.text_input(
+                "🔑 OpenRouter API Key (Gym Buddy)",
+                value=st.session_state["openrouter_api_key"],
+                type="password",
+                placeholder="sk-or-v1-...",
+                help="Free key from https://openrouter.ai/keys",
+            )
+            
+            if st.button("💾 Save OpenRouter Key", use_container_width=True):
+                st.session_state["openrouter_api_key"] = openrouter_key_input.strip()
+                
+            if st.session_state.get("openrouter_api_key", "").strip():
+                st.success("✅ OpenRouter API key saved for this session.")
+            else:
+                st.warning("⚠️ Please enter your OpenRouter API key.")
         else:
-            st.caption("Add your Gemini API key to enable AI features.")
+            api_key = st.text_input(
+                "🔑 Gemini API Key",
+                type="password",
+                placeholder="AIza...",
+                help="Free key from https://makersuite.google.com/app/apikey",
+            )
+            if api_key:
+                os.environ["GEMINI_API_KEY"] = api_key.strip()
+                st.success("Gemini API key saved for this session.")
+            elif os.environ.get("GEMINI_API_KEY", "").startswith("AIza"):
+                st.success("Gemini API key already set.")
+            else:
+                st.caption("Add your Gemini API key to enable AI features.")
 
         mongo_ok, mongo_msg = get_storage_status()
         if mongo_ok:
