@@ -1,0 +1,10 @@
+.env
+venv/
+venv2/
+.venv/
+__pycache__/
+*.pyc
+.pycache_check/
+scratch/
+chat_history.json
+output images/
