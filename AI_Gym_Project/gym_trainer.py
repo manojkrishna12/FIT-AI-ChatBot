@@ -24,6 +24,13 @@ import streamlit as st
 from PIL import Image
 
 try:
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+    import av
+except ImportError:
+    webrtc_streamer = None
+    VideoProcessorBase = object
+
+try:
     import mediapipe as mp
 except ImportError:
     mp = None
@@ -201,6 +208,22 @@ def _form_feedback(angle: float, exercise: str, cfg: dict) -> list[str]:
     return fb
 
 
+class RepCounter:
+    def __init__(self, exercise: str):
+        self.exercise = exercise
+        self.cfg = EXERCISE_CONFIG.get(exercise, EXERCISE_CONFIG["Squat"])
+        self.rep_count = 0
+        self.stage = None
+        
+    def process_angle(self, angle: float) -> tuple[int, str]:
+        if angle > self.cfg["up_angle"]:
+            self.stage = "up"
+        if angle < self.cfg["down_angle"] and self.stage == "up":
+            self.stage = "down"
+            self.rep_count += 1
+        return self.rep_count, self.stage
+
+
 # ══════════════════════════════════════════════════════════════
 # 🎬  VIDEO PROCESSING
 # ══════════════════════════════════════════════════════════════
@@ -220,9 +243,8 @@ def process_video(video_path: str, exercise: str = "Squat") -> dict:
     """
     cap = cv2.VideoCapture(video_path)
     cfg = EXERCISE_CONFIG.get(exercise, EXERCISE_CONFIG["Squat"])
+    counter = RepCounter(exercise)
 
-    rep_count   = 0
-    stage       = None          # "up" | "down"
     angles      = []
     all_frames  = []
     frame_idx   = 0
@@ -253,11 +275,7 @@ def process_video(video_path: str, exercise: str = "Squat") -> dict:
                     angles.append(angle)
 
                     # ── Rep counting state machine ──
-                    if angle > cfg["up_angle"]:
-                        stage = "up"
-                    if angle < cfg["down_angle"] and stage == "up":
-                        stage = "down"
-                        rep_count += 1
+                    reps, stage = counter.process_angle(angle)
 
                     # Annotate frame
                     mp_drawing.draw_landmarks(
@@ -266,7 +284,7 @@ def process_video(video_path: str, exercise: str = "Squat") -> dict:
                         mp_pose.POSE_CONNECTIONS,
                         connection_drawing_spec=CONNECTION_STYLE,
                     )
-                    _overlay_stats(frame, rep_count, int(angle), stage or "")
+                    _overlay_stats(frame, reps, int(angle), stage or "")
 
                 except Exception:
                     pass
@@ -283,7 +301,7 @@ def process_video(video_path: str, exercise: str = "Squat") -> dict:
             samples.append(cv2.cvtColor(all_frames[i], cv2.COLOR_BGR2RGB))
 
     return {
-        "rep_count"    : rep_count,
+        "rep_count"    : counter.rep_count,
         "avg_angle"    : round(np.mean(angles), 1) if angles else 0.0,
         "angles"       : angles,
         "sample_frames": samples,
@@ -303,6 +321,76 @@ def _overlay_stats(frame: np.ndarray, reps: int, angle: int, stage: str) -> None
                 cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 200, 255), 2)
     cv2.putText(frame, f"Stage: {stage.upper()}", (10, 135),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 200, 0), 2)
+
+
+# ══════════════════════════════════════════════════════════════
+# 🔴  WEBRTC LIVE WEBCAM PROCESSING
+# ══════════════════════════════════════════════════════════════
+
+class GymVideoProcessor(VideoProcessorBase):
+    def __init__(self):
+        self.exercise = "Squat"
+        self.counter = RepCounter(self.exercise)
+        if mp_pose is not None:
+            self.pose = mp_pose.Pose(
+                min_detection_confidence=MIN_DETECTION_CONFIDENCE,
+                min_tracking_confidence=MIN_TRACKING_CONFIDENCE,
+            )
+        else:
+            self.pose = None
+
+    def set_exercise(self, exercise: str):
+        if self.exercise != exercise:
+            self.exercise = exercise
+            self.counter = RepCounter(exercise)
+
+    def recv(self, frame):
+        img = frame.to_ndarray(format="bgr24")
+        if self.pose is None:
+            return av.VideoFrame.from_ndarray(img, format="bgr24")
+
+        cfg = EXERCISE_CONFIG.get(self.exercise, EXERCISE_CONFIG["Squat"])
+        rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        out = self.pose.process(rgb)
+        
+        reps = self.counter.rep_count
+        stage = self.counter.stage or ""
+        angle_val = 0
+        fb_msg = ""
+        
+        if out.pose_landmarks:
+            mp_drawing.draw_landmarks(
+                img,
+                out.pose_landmarks,
+                mp_pose.POSE_CONNECTIONS,
+                connection_drawing_spec=CONNECTION_STYLE,
+            )
+            try:
+                lms = out.pose_landmarks.landmark
+                A = get_landmark_coords(lms, cfg["landmarks"][0], img.shape)
+                B = get_landmark_coords(lms, cfg["landmarks"][1], img.shape)
+                C = get_landmark_coords(lms, cfg["landmarks"][2], img.shape)
+                angle = calculate_angle(A, B, C)
+                angle_val = int(angle)
+                
+                reps, stage = self.counter.process_angle(angle)
+                fb = _form_feedback(angle, self.exercise, cfg)
+                fb_msg = fb[0] if fb else ""
+            except Exception:
+                pass
+        else:
+            fb_msg = "⚠️ No person detected. Move into the frame."
+        
+        _overlay_stats(img, reps, angle_val, stage)
+        
+        # Add feedback at the bottom (handle long feedback gracefully)
+        if fb_msg:
+            # Clean emojis for cv2 which can't render them well, but it's okay, they usually show as '?' or boxes, so we strip them
+            clean_msg = fb_msg.replace("✅", "").replace("⚠️", "WARN:").replace("📊", "INFO:").replace("🔝", "TOP:").strip()
+            cv2.putText(img, clean_msg, (10, img.shape[0] - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+                        
+        return av.VideoFrame.from_ndarray(img, format="bgr24")
 
 
 # ══════════════════════════════════════════════════════════════
@@ -379,9 +467,10 @@ def render_gym_trainer_page() -> None:
             "The workout planner and exercise database still work."
         )
 
-    tab1, tab2, tab3, tab4 = st.tabs(
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(
         ["📸 Image Analysis", "🎬 Video & Rep Counter",
-         "📋 Workout Plan Generator", "🗂️ Exercise Database"]
+         "📋 Workout Plan Generator", "🗂️ Exercise Database",
+         "🔴 Live Webcam"]
     )
 
     # ── TAB 1 : Image Analysis ────────────────────────────────────
@@ -565,3 +654,31 @@ def render_gym_trainer_page() -> None:
             st.caption(f"Showing {min(50, len(filtered))} of {len(filtered)} exercises")
         else:
             st.info("Place exercises.csv in the Data/ folder to enable the full exercise database.")
+
+
+    # ── TAB 5 : Live Webcam ───────────────────────────────────────
+    with tab5:
+        st.subheader("🔴 Live Real-Time WebRTC Tracking")
+        st.markdown(
+            "Start your camera and perform the exercise. "
+            "Reps and form feedback will be shown live on your screen!"
+        )
+        
+        if webrtc_streamer is None:
+            st.error("`streamlit-webrtc` is not installed. Please install it to use Live Webcam.")
+        else:
+            rtc_configuration = {"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+            
+            ex_webcam = st.selectbox("Select Exercise for Live Tracking", list(EXERCISE_CONFIG.keys()), key="webcam_ex")
+            
+            ctx = webrtc_streamer(
+                key="gym-trainer",
+                mode=1,  # WebRtcMode.SENDRECV
+                rtc_configuration=rtc_configuration,
+                video_processor_factory=GymVideoProcessor,
+                media_stream_constraints={"video": True, "audio": False},
+                async_processing=True,
+            )
+            
+            if ctx.video_processor:
+                ctx.video_processor.set_exercise(ex_webcam)

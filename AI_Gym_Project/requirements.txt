@@ -13,3 +13,5 @@ dnspython
 kaggle
 scikit-learn
 altair
+streamlit-webrtc
+av
