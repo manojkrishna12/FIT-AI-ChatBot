@@ -87,20 +87,42 @@ def calculate_tdee(
     return round(bmr * multiplier)
 
 
-def macro_split(calories: int, goal: str) -> dict[str, int]:
-    """Return recommended macro grams for a calorie target and goal."""
-    splits = {
-        "Weight Loss": (0.40, 0.30, 0.30),
-        "Weight Gain": (0.30, 0.50, 0.20),
-        "Muscle Building": (0.40, 0.35, 0.25),
-        "Weight Maintenance": (0.30, 0.40, 0.30),
-        "Athletic Performance": (0.30, 0.50, 0.20),
-    }
-    p_ratio, c_ratio, f_ratio = splits.get(goal, (0.30, 0.40, 0.30))
+def macro_split(calories: int, goal: str, weight_kg: float) -> dict[str, int]:
+    """Return recommended macro grams based on weight, goal, and remaining calories."""
+    # Determine protein and fat multipliers based on goal (g per kg of bodyweight)
+    if goal == "Weight Loss":
+        p_mult, f_mult = 2.2, 0.8
+    elif goal == "Muscle Building":
+        p_mult, f_mult = 2.0, 1.0
+    elif goal == "Weight Gain":
+        p_mult, f_mult = 1.8, 1.2
+    elif goal == "Athletic Performance":
+        p_mult, f_mult = 1.8, 1.0
+    else:  # Maintenance and others
+        p_mult, f_mult = 1.6, 1.0
+
+    protein_g = int(weight_kg * p_mult)
+    fat_g = int(weight_kg * f_mult)
+    
+    # Calculate calories taken by protein and fat
+    pf_cals = (protein_g * 4) + (fat_g * 9)
+    
+    # Remaining calories for carbs
+    remaining_cals = calories - pf_cals
+    carbs_g = max(0, int(remaining_cals / 4))
+    
+    # Safety fallback for extreme low calories: proportional split if carbs < 0
+    if remaining_cals < 0:
+        return {
+            "Protein (g)": round((calories * 0.4) / 4),
+            "Carbs (g)": round((calories * 0.3) / 4),
+            "Fat (g)": round((calories * 0.3) / 9),
+        }
+
     return {
-        "Protein (g)": round((calories * p_ratio) / 4),
-        "Carbs (g)": round((calories * c_ratio) / 4),
-        "Fat (g)": round((calories * f_ratio) / 9),
+        "Protein (g)": protein_g,
+        "Carbs (g)": carbs_g,
+        "Fat (g)": fat_g,
     }
 
 

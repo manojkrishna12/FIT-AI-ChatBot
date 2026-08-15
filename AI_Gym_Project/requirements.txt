@@ -1,6 +1,6 @@
 streamlit
 google-generativeai
-mediapipe>=0.10.14
+mediapipe==0.10.14
 opencv-python-headless
 Pillow
 pandas

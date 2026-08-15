@@ -23,32 +23,64 @@ from m import (
 from storage import append_session_history, save_current_user_state
 
 
-def ai_diet_plan(user_data: dict, model=None) -> str:
-    """Generate a 7-day diet plan."""
+import json
+
+def ai_diet_plan(user_data: dict, model=None) -> str | dict:
+    """Generate a 7-day diet plan using JSON structure."""
     prompt = f"""
 You are a certified nutritionist.
-
 Create a practical 7-day meal plan for:
 Name: {user_data['name']}
 Age: {user_data['age']}
 Gender: {user_data['gender']}
 Weight: {user_data['weight']} kg
 Height: {user_data['height']} cm
-BMI: {user_data['bmi']} ({user_data['bmi_cat']})
 Activity: {user_data['activity']}
 Goal: {user_data['goal']}
-Calories: {user_data['calories']} kcal
-Protein: {user_data['macros']['Protein (g)']} g
-Carbs: {user_data['macros']['Carbs (g)']} g
-Fat: {user_data['macros']['Fat (g)']} g
+Calories target: {user_data['calories']} kcal
+Protein target: {user_data['macros']['Protein (g)']} g
+Carbs target: {user_data['macros']['Carbs (g)']} g
+Fat target: {user_data['macros']['Fat (g)']} g
 Dietary style: {user_data['diet_type']}
-Allergies: {user_data['allergies']}
-Cuisine: {user_data['cuisine']}
+Allergies/Avoid: {user_data['allergies']}
+Meals per day: {user_data['meals_per_day']}
+Cuisine/Notes: {user_data['cuisine']}
 
-Format each day with breakfast, lunch, dinner, snacks, hydration, and daily total.
-End with 5 tips and one motivating note.
+CRITICAL CONSTRAINTS:
+1. NEVER include items from "Allergies/Avoid".
+2. If Cuisine/Notes suggests Indian food (or if left broad and user is in India), include common Indian foods (Roti, Dal, Paneer, Idli, etc.) while respecting the Dietary style.
+3. You must provide exactly {user_data['meals_per_day']} meals per day.
+
+Respond ONLY with a valid JSON object in the following format (do not include markdown codeblocks, just the raw JSON):
+{{
+  "days": [
+    {{
+      "day": 1,
+      "meals": [
+        {{
+          "meal_name": "Breakfast",
+          "items": "2 scrambled eggs, 1 toast",
+          "serving_size": "2 eggs, 1 slice",
+          "calories": 300,
+          "protein": 14,
+          "carbohydrates": 15,
+          "fat": 10
+        }}
+      ]
+    }}
+  ]
+}}
+Do not calculate daily totals in the JSON, the application will do that.
 """
-    return get_gemini_response(prompt, model)
+    try:
+        response_text = get_gemini_response(prompt, model)
+        if response_text.startswith("```json"):
+            response_text = response_text[7:-3]
+        elif response_text.startswith("```"):
+            response_text = response_text[3:-3]
+        return json.loads(response_text.strip())
+    except Exception as e:
+        return f"Error parsing AI response: {e}"
 
 
 def ai_grocery_list(meal_plan: str, model=None) -> str:
@@ -59,10 +91,15 @@ Based on this 7-day meal plan, generate a weekly grocery list for one person.
 Meal plan:
 {meal_plan[:3000]}
 
-Organize it by category and keep quantities specific.
-End with 2 practical shopping tips.
+CRITICAL:
+1. Group items logically exactly into these categories: Produce, Protein, Grains/Carbohydrates, Dairy, Other.
+2. Avoid duplicate items. Combine quantities if necessary.
+3. End with 2 practical shopping tips.
 """
-    return get_gemini_response(prompt, model)
+    try:
+        return get_gemini_response(prompt, model)
+    except Exception as e:
+        return f"Error generating grocery list: {e}"
 
 
 def ai_meal_analysis(meal_description: str, model=None) -> str:
@@ -71,23 +108,31 @@ def ai_meal_analysis(meal_description: str, model=None) -> str:
 Analyze this meal:
 {meal_description}
 
-Return:
-- Estimated calories
-- Protein
-- Carbs
-- Fat
-- Health rating out of 10
-- What's good
-- What to watch
-- How to make it healthier
+Return a structured markdown response with:
+- **Estimated Calories**: ...
+- **Protein**: ...
+- **Carbs**: ...
+- **Fat**: ...
+- **Health Rating**: .../10
+- **What's Good**: ...
+- **What to Watch**: ...
+- **How to Improve**: ...
+
+CRITICAL: Clearly state at the beginning that these are AI-estimated values and may not be 100% accurate.
 """
-    return get_gemini_response(prompt, model)
+    try:
+        return get_gemini_response(prompt, model)
+    except Exception as e:
+        return f"Error generating meal analysis: {e}"
 
 
 def ai_nutrition_tip(goal: str, model=None) -> str:
     """Return one short nutrition tip."""
-    prompt = f"Give one practical nutrition tip for someone focused on {goal}. Keep it under 60 words."
-    return get_gemini_response(prompt, model)
+    try:
+        prompt = f"Give one practical nutrition tip for someone focused on {goal}. Keep it under 60 words."
+        return get_gemini_response(prompt, model)
+    except Exception:
+        return "Stay hydrated and eat balanced meals!"
 
 
 def _history_expander(title: str, items: list[dict], preview_key: str) -> None:
@@ -97,7 +142,46 @@ def _history_expander(title: str, items: list[dict], preview_key: str) -> None:
     with st.expander(title):
         for item in items[:5]:
             st.markdown(f"**{item['created_at']}**")
-            st.caption(item.get(preview_key, "")[:320] + "...")
+            st.caption(str(item.get(preview_key, ""))[:320] + "...")
+
+def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int, target_c: int, target_f: int) -> str:
+    if not isinstance(plan_data, dict) or "days" not in plan_data:
+        return str(plan_data)
+        
+    md = []
+    for day in plan_data.get("days", []):
+        md.append(f"## Day {day.get('day', 'Unknown')}")
+        daily_cal = daily_p = daily_c = daily_f = 0
+        for meal in day.get("meals", []):
+            name = meal.get("meal_name", "Meal")
+            items = meal.get("items", "")
+            serving = meal.get("serving_size", "")
+            cals = int(meal.get("calories", 0))
+            p = int(meal.get("protein", 0))
+            c = int(meal.get("carbohydrates", 0))
+            f = int(meal.get("fat", 0))
+            
+            daily_cal += cals
+            daily_p += p
+            daily_c += c
+            daily_f += f
+            
+            md.append(f"#### {name}")
+            if serving:
+                md.append(f"- **Items**: {items} ({serving})")
+            else:
+                md.append(f"- **Items**: {items}")
+            md.append(f"- *Estimates: {cals} kcal | {p}g protein | {c}g carbs | {f}g fat*")
+        
+        md.append("---")
+        md.append(f"**Daily Totals (Calculated by App from AI estimates)**:")
+        md.append(f"- **Calories**: {daily_cal} kcal *(Target: {target_cal})*")
+        md.append(f"- **Protein**: {daily_p}g *(Target: {target_p}g)*")
+        md.append(f"- **Carbs**: {daily_c}g *(Target: {target_c}g)*")
+        md.append(f"- **Fat**: {daily_f}g *(Target: {target_f}g)*")
+        md.append("---")
+    
+    return "\\n".join(md)
 
 
 def render_diet_page() -> None:
@@ -107,6 +191,7 @@ def render_diet_page() -> None:
         "AI Dietician & Calorie Coach",
         "Your personal nutritionist — meal plans, calorie tracking, and food insights",
     )
+    st.warning("🩺 **Medical Disclaimer:** The AI Dietician provides general nutrition guidance and is NOT a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider with any questions you may have regarding a medical condition, pregnancy, eating disorder, or specialized diet.")
 
     model = None
     nutrition_df = load_nutrition_data()
@@ -151,6 +236,7 @@ def render_diet_page() -> None:
                         "No Restriction",
                         "Vegetarian",
                         "Vegan",
+                        "Eggitarian",
                         "Keto",
                         "Mediterranean",
                         "Paleo",
@@ -159,10 +245,15 @@ def render_diet_page() -> None:
                     ],
                 )
                 allergies = st.text_input("Allergies / Foods to avoid", "None")
-                cuisine = st.text_input("Cuisine preference (optional)", "Any")
+                meals_per_day = st.number_input("Meals per day", 2, 6, 4)
+                cuisine = st.text_input("Cuisine preference / Notes (optional)", "Any")
             submitted = st.form_submit_button("🍽️ Generate My Diet Plan", use_container_width=True)
 
         if submitted:
+            if weight <= 0 or height <= 0 or age <= 0:
+                st.error("Please enter valid positive numbers for Age, Weight, and Height.")
+                st.stop()
+                
             bmi, bmi_cat = calculate_bmi(weight, height)
             tdee = calculate_tdee(weight, height, age, gender, activity)
             cal_offset = {
@@ -172,8 +263,15 @@ def render_diet_page() -> None:
                 "Weight Maintenance": 0,
                 "Athletic Performance": 0,
             }
-            target_cal = max(1200, tdee + cal_offset.get(goal, 0))
-            macros = macro_split(target_cal, goal)
+            target_cal = tdee + cal_offset.get(goal, 0)
+            
+            if target_cal < 1200:
+                st.warning("⚠️ **Warning**: Your calculated calorie target is unusually low (below 1200 kcal). We strongly recommend consulting a qualified healthcare professional before starting an extreme calorie-restriction diet. We have adjusted your target to a safer minimum of 1200 kcal for this plan.")
+                target_cal = 1200
+            elif target_cal > 4000:
+                st.warning("⚠️ **Warning**: Your calculated calorie target is very high. Please consult a professional to ensure this is appropriate for you.")
+
+            macros = macro_split(target_cal, goal, weight)
 
             st.markdown("### Your Stats")
             c1, c2, c3, c4 = st.columns(4)
@@ -210,29 +308,41 @@ def render_diet_page() -> None:
                 "macros": macros,
                 "diet_type": diet_type,
                 "allergies": allergies,
+                "meals_per_day": meals_per_day,
                 "cuisine": cuisine,
             }
 
             with st.spinner("Building your personalised 7-day meal plan..."):
-                plan = ai_diet_plan(user_data, model)
+                plan_data = ai_diet_plan(user_data, model)
+                
+            if isinstance(plan_data, dict):
+                plan_md = format_json_plan_to_markdown(
+                    plan_data, 
+                    target_cal, 
+                    macros['Protein (g)'], 
+                    macros['Carbs (g)'], 
+                    macros['Fat (g)']
+                )
+            else:
+                plan_md = str(plan_data)
 
             st.success("Your personalised diet plan is ready.")
-            st.markdown(plan)
-            st.session_state["diet_plan"] = plan
+            st.markdown(plan_md)
+            st.session_state["diet_plan"] = plan_md
             st.session_state["calorie_goal"] = target_cal
             append_session_history(
                 "diet_plan_history",
                 {
                     "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "goal": goal,
-                    "plan": plan,
+                    "plan": plan_md,
                 },
             )
             save_current_user_state()
 
             st.download_button(
                 "📥 Download Diet Plan",
-                plan,
+                plan_md,
                 file_name=f"{name}_diet_plan.txt",
                 mime="text/plain",
             )

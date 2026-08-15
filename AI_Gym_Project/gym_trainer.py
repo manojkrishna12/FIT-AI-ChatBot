@@ -24,7 +24,7 @@ import streamlit as st
 from PIL import Image
 
 try:
-    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase
+    from streamlit_webrtc import webrtc_streamer, VideoProcessorBase, WebRtcMode
     import av
 except ImportError:
     webrtc_streamer = None
@@ -493,12 +493,12 @@ def render_gym_trainer_page() -> None:
                 res = process_image(img_bgr, exercise)
 
             c1, c2 = st.columns(2)
-            c1.image(pil_img, caption="Original", use_column_width=True)
+            c1.image(pil_img, caption="Original", use_container_width=True)
             if res["annotated"] is not None:
                 c2.image(
                     cv2.cvtColor(res["annotated"], cv2.COLOR_BGR2RGB),
                     caption="Pose Detected",
-                    use_column_width=True,
+                    use_container_width=True,
                 )
 
             if res["pose_detected"]:
@@ -559,7 +559,7 @@ def render_gym_trainer_page() -> None:
                 cols = st.columns(len(vres["sample_frames"]))
                 labels = ["Start", "Middle", "End"]
                 for col, frame, lbl in zip(cols, vres["sample_frames"], labels):
-                    col.image(frame, caption=lbl, use_column_width=True)
+                    col.image(frame, caption=lbl, use_container_width=True)
 
             if vres["rep_count"] == 0:
                 st.warning(
@@ -673,7 +673,7 @@ def render_gym_trainer_page() -> None:
             
             ctx = webrtc_streamer(
                 key="gym-trainer",
-                mode=1,  # WebRtcMode.SENDRECV
+                mode=WebRtcMode.SENDRECV,
                 rtc_configuration=rtc_configuration,
                 video_processor_factory=GymVideoProcessor,
                 media_stream_constraints={"video": True, "audio": False},
