@@ -11,7 +11,7 @@ import streamlit as st
 
 from constants import CHAT_CONTEXT_TURNS, MOTIVATIONAL_QUOTES
 import requests
-from m import page_header
+from m import page_header, get_gemini_response
 from storage import save_current_user_state
 
 
@@ -96,77 +96,9 @@ def sentiment_emoji(sentiment: str) -> str:
 
 
 
-def get_openrouter_response(messages: list[dict], api_key: str) -> str:
-    """Call OpenRouter API safely with a free-model fallback chain."""
-    print(f"[Gym Buddy] OpenRouter key present: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
-
-    if not api_key:
-        return "FitBot is unavailable. Please enter your OpenRouter API key in the sidebar."
-
-    # Ordered list of free models to try — first available wins
-    FREE_MODELS = [
-        "mistralai/mistral-7b-instruct:free",
-        "microsoft/phi-3-mini-128k-instruct:free",
-        "google/gemma-3-1b-it:free",
-        "meta-llama/llama-3.2-1b-instruct:free",
-        "qwen/qwen-2-7b-instruct:free",
-    ]
-
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://ai-gym-assistant.app",
-        "X-Title": "AI Gym Assistant",
-    }
-
-    for model_id in FREE_MODELS:
-        print(f"[Gym Buddy] Trying model: {model_id}")
-        payload = {
-            "model": model_id,
-            "messages": messages,
-        }
-        try:
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=25,
-            )
-            print(f"[Gym Buddy] Status: {resp.status_code}")
-
-            if resp.status_code == 401:
-                return "❌ The OpenRouter API key is invalid or unauthorized. Please check your key."
-            elif resp.status_code == 429:
-                print(f"[Gym Buddy] {model_id} rate limited, trying next...")
-                continue
-            elif resp.status_code == 200:
-                data = resp.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    content = data["choices"][0]["message"]["content"]
-                    if content and content.strip():
-                        print(f"[Gym Buddy] SUCCESS with {model_id}")
-                        return content.strip()
-                print(f"[Gym Buddy] {model_id} returned empty content, trying next...")
-                continue
-            else:
-                print(f"[Gym Buddy] {model_id} returned {resp.status_code}, trying next...")
-                continue
-        except requests.exceptions.Timeout:
-            print(f"[Gym Buddy] {model_id} timed out, trying next...")
-            continue
-        except Exception as e:
-            print(f"[Gym Buddy] {model_id} error: {e}, trying next...")
-            continue
-
-    return "FitBot is temporarily unavailable. All free OpenRouter models are busy. Please try again in a moment."
-
 def chat_with_buddy(user_msg: str, history: list[dict]) -> str:
     """Generate a FitBot reply using recent conversation context."""
-    api_key = st.session_state.get("openrouter_api_key", "").strip()
-    if not api_key:
-        return "FitBot is unavailable. Please enter your OpenRouter API key."
-    
-    # Format messages for OpenRouter (OpenAI-compatible)
+# Format messages for OpenRouter (OpenAI-compatible)
     messages = [{"role": "system", "content": _BUDDY_SYSTEM}]
     
     for turn in history[-CHAT_CONTEXT_TURNS:]:
@@ -174,37 +106,38 @@ def chat_with_buddy(user_msg: str, history: list[dict]) -> str:
         
     messages.append({"role": "user", "content": user_msg})
 
-    return get_openrouter_response(messages, api_key)
+    prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+    return get_gemini_response(prompt)
 
 
 def ai_daily_challenge() -> str:
     """Generate one short daily challenge."""
-    api_key = st.session_state.get("openrouter_api_key", "").strip()
     messages = [
         {"role": "system", "content": _BUDDY_SYSTEM},
         {"role": "user", "content": "Generate one beginner-friendly, equipment-free fitness challenge that takes 10 minutes or less.\n\nFormat:\nChallenge: [name]\nDuration: [minutes]\nTask: [1 to 2 sentences]\nWhy it helps: [1 sentence]\nSign-off: [1 motivating sentence]"}
     ]
-    return get_openrouter_response(messages, api_key)
+    prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+    return get_gemini_response(prompt)
 
 
 def ai_mood_boost(mood: str) -> str:
     """Return a short motivational response for the current mood."""
-    api_key = st.session_state.get("openrouter_api_key", "").strip()
     messages = [
         {"role": "system", "content": _BUDDY_SYSTEM},
         {"role": "user", "content": f"The user feels '{mood}' about fitness today.\n\nReply in under 120 words with:\n1. A real acknowledgement of the feeling\n2. One motivating insight\n3. One tiny action they can take right now\n4. One memorable closing line\n\nWrite it like a supportive message from a friend."}
     ]
-    return get_openrouter_response(messages, api_key)
+    prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+    return get_gemini_response(prompt)
 
 
 def ai_weekly_tip(focus: str) -> str:
     """Return one specific practical tip."""
-    api_key = st.session_state.get("openrouter_api_key", "").strip()
     messages = [
         {"role": "system", "content": _BUDDY_SYSTEM},
         {"role": "user", "content": f"Give one expert tip about {focus}.\nKeep it under 80 words, practical, and easy to apply.\nStart with one fitting emoji."}
     ]
-    return get_openrouter_response(messages, api_key)
+    prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+    return get_gemini_response(prompt)
 
 
 def _ensure_welcome_message() -> None:

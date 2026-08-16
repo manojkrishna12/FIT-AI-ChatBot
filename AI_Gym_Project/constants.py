@@ -14,7 +14,7 @@ load_dotenv()
 # 🔑 API CONFIGURATION
 # ─────────────────────────────────────────────
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
-GEMINI_MODEL    = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODEL    = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_REQUEST_TIMEOUT_S = int(os.getenv("GEMINI_REQUEST_TIMEOUT_S", "20"))
 CHAT_CONTEXT_TURNS = int(os.getenv("CHAT_CONTEXT_TURNS", "8"))
 

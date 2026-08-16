@@ -6,3 +6,5 @@ __pycache__/
 *.pyc
 .pycache_check/
 scratch/
+
+.env

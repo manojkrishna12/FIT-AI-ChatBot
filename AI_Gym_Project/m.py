@@ -30,12 +30,8 @@ def _cached_gemini_client(api_key: str) -> genai.Client:
 
 def initialize_gemini() -> genai.Client | None:
     """Return a cached Gemini Client if the API key is configured."""
-    key = os.environ.get("GEMINI_API_KEY", GEMINI_API_KEY)
-    if not key or key == "YOUR_GEMINI_API_KEY_HERE":
-        st.warning(
-            "Gemini API key not found. Please enter your key in the sidebar Settings panel.",
-            icon="🔑",
-        )
+    key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not key:
         return None
     return _cached_gemini_client(key)
 
@@ -47,12 +43,12 @@ def get_gemini_response(prompt: str, client: genai.Client | None = None) -> str:
 
     try:
         api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-        if not api_key or api_key == "YOUR_GEMINI_API_KEY_HERE":
-            print("[Gemini] API key missing")
-            return "Please enter a valid Gemini API key in Settings."
-
-        print(f"[Gemini] API key present: True, length: {len(api_key)}")
+        print(f"[Gemini] API key configured: {bool(api_key)}")
         print(f"[Gemini] Model: {GEMINI_MODEL}")
+        
+        if not api_key:
+            print("[Gemini] Request failed")
+            return "Gemini API key is not configured. Add GEMINI_API_KEY to the .env file."
 
         if client is None:
             client = genai.Client(api_key=api_key)
@@ -63,53 +59,20 @@ def get_gemini_response(prompt: str, client: genai.Client | None = None) -> str:
         )
 
         if not response or not response.text:
-            print("[Gemini] Empty response received")
+            print("[Gemini] Request failed")
             return "Gemini returned an empty response. Please try again."
 
-        print("[Gemini] SUCCESS")
+        print("[Gemini] Request successful")
         print("="*50 + "\n")
         return response.text.strip()
 
     except Exception as e:
         err_str = str(e).lower()
-        print(f"[Gemini] FAILED — {type(e).__name__}: {e}")
-
-        # Try to auto-recover by listing available models on 404
-        if ("404" in err_str or "not found" in err_str) and client is not None:
-            print("[Gemini] 404: attempting model auto-recovery...")
-            try:
-                working_model = None
-                for m in client.models.list():
-                    methods = getattr(m, "supported_generation_methods", [])
-                    if "generateContent" in methods:
-                        name = m.name
-                        if name.startswith("models/"):
-                            name = name.split("/", 1)[1]
-                        if "flash" in name or "pro" in name:
-                            working_model = name
-                            break
-                if working_model:
-                    print(f"[Gemini] Retrying with {working_model}")
-                    response = client.models.generate_content(
-                        model=working_model,
-                        contents=prompt,
-                    )
-                    print("[Gemini] Auto-recovery SUCCESS")
-                    return response.text.strip()
-            except Exception as e2:
-                print(f"[Gemini] Auto-recovery failed: {e2}")
-
+        print(f"[Gemini] Request failed: {e}")
         print("="*50 + "\n")
-
-        if "401" in err_str or "403" in err_str or "unauthenticated" in err_str or "api key not valid" in err_str:
-            return "Gemini API authentication failed. Please check your API key."
-        elif "404" in err_str or "not found" in err_str:
-            return "Gemini model unavailable. The app will use the built-in fallback."
-        elif "429" in err_str or "quota" in err_str or "rate" in err_str:
-            return "Gemini rate limit reached. The app will use the built-in fallback."
-        else:
-            return f"Gemini is temporarily unavailable. The app will use the built-in fallback."
-
+        if "400" in err_str or "401" in err_str or "403" in err_str or "api key not valid" in err_str or "unauthenticated" in err_str or "invalid api key" in err_str or "projects/" in err_str:
+            return f"Error: The Gemini API key in your .env file is invalid. Make sure it starts with 'AIza' and is not a Project ID. Details: {e}"
+        return "Gemini is temporarily unavailable. Please try again in a moment."
 
 # ── BMI / TDEE helpers ─────────────────────────────────────────────────────────
 

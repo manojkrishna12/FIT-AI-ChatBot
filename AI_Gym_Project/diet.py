@@ -14,10 +14,8 @@ from m import (
     calculate_bmi,
     calculate_tdee,
     get_gemini_response,
-    load_nutrition_data,
     macro_split,
     page_header,
-    search_nutrition_db,
     show_metrics_row,
 )
 from storage import save_current_user_state
@@ -151,7 +149,7 @@ Respond ONLY with a valid JSON object in the following format (NO markdown block
 
     print("[DIET] Gemini attempt started")
     try:
-        response_text = get_gemini_response(prompt, model)
+        response_text = get_gemini_response(prompt)
         
         # Check if the response is actually an error message from our helper
         if not response_text or "unavailable" in response_text.lower() or "failed" in response_text.lower() or "api key" in response_text.lower():
@@ -201,7 +199,7 @@ CRITICAL:
 3. End with 2 practical shopping tips.
 """
     try:
-        resp = get_gemini_response(prompt, model)
+        resp = get_gemini_response(prompt)
         if "Add a Gemini API key" in resp or "Error" in resp:
             # Deterministic fallback if API fails
             fallback = ["**Fallback Grocery List (Generated from items)**"]
@@ -213,38 +211,67 @@ CRITICAL:
 
 
 def ai_meal_analysis(meal_description: str, model=None) -> str:
-    """Generate a nutrition breakdown for a meal."""
-    prompt = f"""
-Analyze this meal:
-{meal_description}
+    """Generate a nutrition breakdown for a meal using JSON."""
+    prompt = f"""Analyze this meal and return ONLY a valid JSON object (no markdown formatting, no extra text).
+Meal: {meal_description}
 
-Return a structured markdown response with:
-- **Estimated Calories**: ...
-- **Protein**: ...
-- **Carbs**: ...
-- **Fat**: ...
-- **Health Rating**: .../10
-- **What's Good**: ...
-- **What to Watch**: ...
-- **How to Improve**: ...
-
-CRITICAL: Clearly state at the beginning that these are AI-estimated values and may not be 100% accurate.
+Return exactly this JSON structure:
+{{
+  "calories": 350,
+  "protein": 25,
+  "carbs": 40,
+  "fat": 10,
+  "fiber": 5,
+  "serving_assumption": "1 standard serving",
+  "notes": "brief health note"
+}}
+Use realistic estimated values. All numeric fields must be integers.
 """
     try:
-        resp = get_gemini_response(prompt, model)
-        if "Add a Gemini API key" in resp or "Error" in resp:
+        resp = get_gemini_response(prompt)
+        
+        if resp.startswith("Error: The Gemini API key"):
             return resp
-        return resp
-    except Exception as e:
-        print(f"[Dietician] Meal Analysis Error: {e}")
-        return "AI service is temporarily unavailable. Please try again in a moment."
+
+        if not resp or "unavailable" in resp.lower() or "failed" in resp.lower() or "api key" in resp.lower():
+            return "Meal analysis is temporarily unavailable. Please try again."
+
+        import json, re
+        text = resp.strip()
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0]
+        elif "```" in text:
+            text = text.split("```")[1].split("```")[0]
+            
+        try:
+            data = json.loads(text.strip())
+        except json.JSONDecodeError:
+            text = re.sub(r',\s*([}\]])', r'\1', text)
+            try:
+                data = json.loads(text.strip())
+            except json.JSONDecodeError:
+                return "Meal analysis is temporarily unavailable. Please try again."
+
+        md = [
+            f"**Estimated Calories**: {data.get('calories', 0)} kcal",
+            f"**Protein**: {data.get('protein', 0)} g",
+            f"**Carbs**: {data.get('carbs', 0)} g",
+            f"**Fat**: {data.get('fat', 0)} g",
+            f"**Fiber**: {data.get('fiber', 0)} g",
+            "",
+            f"*Serving Assumption*: {data.get('serving_assumption', 'Typical serving size')}",
+            f"*Note*: {data.get('notes', '')}"
+        ]
+        return "\n".join(md)
+    except Exception:
+        return "Meal analysis is temporarily unavailable. Please try again."
 
 
 def ai_nutrition_tip(goal: str, model=None) -> str:
     """Return one short nutrition tip."""
     try:
         prompt = f"Give one practical nutrition tip for someone focused on {goal}. Keep it under 60 words."
-        return get_gemini_response(prompt, model)
+        return get_gemini_response(prompt)
     except Exception:
         return "Stay hydrated and eat balanced meals!"
 
@@ -269,7 +296,7 @@ Return exactly this JSON structure:
 
 Use realistic estimated values. All numeric fields must be integers."""
     try:
-        resp = get_gemini_response(prompt, model)
+        resp = get_gemini_response(prompt)
         # Try to parse JSON from response
         import json, re
         text = resp.strip()
@@ -376,14 +403,12 @@ def render_diet_page() -> None:
     st.warning("🩺 **Medical Disclaimer:** The AI Dietician provides general nutrition guidance and is NOT a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider with any questions you may have regarding a medical condition, pregnancy, eating disorder, or specialized diet.")
 
     model = None
-    nutrition_df = load_nutrition_data()
-
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
+    
+    tab1, tab2, tab3, tab4 = st.tabs(
         [
             "📋 My Diet Plan",
             "🍽️ Meal Analyser",
             "🛒 Grocery List",
-            "🔍 Food Database",
             "📈 Calorie Tracker",
         ]
     )
@@ -548,15 +573,19 @@ def render_diet_page() -> None:
             with st.spinner("Analysing nutritional content..."):
                 analysis = ai_meal_analysis(meal_input, model)
             st.subheader("Nutritional Analysis")
-            st.markdown(analysis)
-            save_current_user_state()
-
-            if st.button("➕ Add to Today's Calorie Log"):
-                st.session_state.setdefault("calorie_log", []).append(
-                    {"meal": meal_input[:60] + "...", "analysis": analysis}
-                )
+            
+            if "temporarily unavailable" in analysis or analysis.startswith("Error:"):
+                st.error(analysis)
+            else:
+                st.markdown(analysis)
                 save_current_user_state()
-                st.success("Added to your calorie log.")
+                
+                if st.button("➕ Add to Today's Calorie Log"):
+                    st.session_state.setdefault("calorie_log", []).append(
+                        {"meal": meal_input[:60] + "...", "analysis": analysis}
+                    )
+                    save_current_user_state()
+                    st.success("Added to your calorie log.")
 
     with tab3:
         st.subheader("🛒 Smart Grocery List Generator")
@@ -585,24 +614,6 @@ def render_diet_page() -> None:
                 st.warning("Please generate or paste a meal plan first.")
 
     with tab4:
-        st.subheader("🔍 Nutrition Database Search")
-        search_q = st.text_input("Search food item", placeholder="e.g. oats, salmon, banana")
-        if search_q:
-            results = search_nutrition_db(search_q, nutrition_df)
-            if results.empty:
-                st.info("No results found. Try the Meal Analyser for AI lookup.")
-            else:
-                st.dataframe(results, use_container_width=True)
-                st.caption(f"Found {len(results)} item(s) matching '{search_q}'")
-
-        if not nutrition_df.empty:
-            with st.expander("Database Overview"):
-                c1, c2 = st.columns(2)
-                c1.metric("Total Food Items", f"{len(nutrition_df):,}")
-                c2.metric("Data Columns", len(nutrition_df.columns))
-                st.dataframe(nutrition_df.head(20), use_container_width=True)
-
-    with tab5:
         st.subheader("📈 Today's Calorie & Macro Tracker")
         goal_cal = st.session_state.get("calorie_goal", 2000)
         st.number_input(

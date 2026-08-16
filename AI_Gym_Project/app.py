@@ -7,6 +7,9 @@ from __future__ import annotations
 import os
 
 import streamlit as st
+from dotenv import load_dotenv
+import os
+load_dotenv()
 
 from m import inject_custom_css
 from storage import ensure_user_state_loaded, get_storage_status, normalize_user_id
@@ -151,39 +154,11 @@ def build_sidebar() -> str:
         else:
             st.caption("Using the shared `guest` profile until you enter a user id.")
 
-        if page == "🤝 Gym Buddy":
-            if "openrouter_api_key" not in st.session_state:
-                st.session_state["openrouter_api_key"] = ""
-                
-            openrouter_key_input = st.text_input(
-                "🔑 OpenRouter API Key (Gym Buddy)",
-                value=st.session_state["openrouter_api_key"],
-                type="password",
-                placeholder="sk-or-v1-...",
-                help="Free key from https://openrouter.ai/keys",
-            )
-            
-            if st.button("💾 Save OpenRouter Key", use_container_width=True):
-                st.session_state["openrouter_api_key"] = openrouter_key_input.strip()
-                
-            if st.session_state.get("openrouter_api_key", "").strip():
-                st.success("✅ OpenRouter API key saved for this session.")
-            else:
-                st.warning("⚠️ Please enter your OpenRouter API key.")
+        gemini_key = os.environ.get("GEMINI_API_KEY", "")
+        if not gemini_key:
+            st.error("Gemini API key is not configured. Add GEMINI_API_KEY to the .env file.")
         else:
-            api_key = st.text_input(
-                "🔑 Gemini API Key",
-                type="password",
-                placeholder="AIza...",
-                help="Free key from https://makersuite.google.com/app/apikey",
-            )
-            if api_key:
-                os.environ["GEMINI_API_KEY"] = api_key.strip()
-                st.success("Gemini API key saved for this session.")
-            elif os.environ.get("GEMINI_API_KEY", "").startswith("AIza"):
-                st.success("Gemini API key already set.")
-            else:
-                st.caption("Add your Gemini API key to enable AI features.")
+            st.success("Gemini API connected.")
 
         mongo_ok, mongo_msg = get_storage_status()
         if mongo_ok:
