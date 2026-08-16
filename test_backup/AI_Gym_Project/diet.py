@@ -250,64 +250,6 @@ def ai_nutrition_tip(goal: str, model=None) -> str:
 
 
 
-def ai_macro_tracker(meal_description: str, model=None) -> dict | None:
-    """Analyze a meal and return structured macros as a dict."""
-    prompt = f"""Analyze this meal and return ONLY a valid JSON object (no markdown, no extra text):
-Meal: {meal_description}
-
-Return exactly this JSON structure:
-{{
-  "food": "brief meal name",
-  "calories": 350,
-  "protein": 25,
-  "carbs": 40,
-  "fat": 10,
-  "fiber": 5,
-  "serving_assumption": "1 standard serving",
-  "notes": "brief health note"
-}}
-
-Use realistic estimated values. All numeric fields must be integers."""
-    try:
-        resp = get_gemini_response(prompt, model)
-        # Try to parse JSON from response
-        import json, re
-        text = resp.strip()
-        if "```" in text:
-            text = text.split("```")[1].split("```")[0]
-            if text.startswith("json"):
-                text = text[4:]
-        result = json.loads(text.strip())
-        # Validate required fields
-        for field in ["calories", "protein", "carbs", "fat"]:
-            if field not in result:
-                result[field] = 0
-        result.setdefault("fiber", 0)
-        result.setdefault("food", meal_description[:50])
-        result.setdefault("serving_assumption", "1 standard serving")
-        result.setdefault("notes", "")
-        return result
-    except Exception:
-        # Deterministic fallback: return rough estimate
-        words = meal_description.lower().split()
-        base_cal = 300
-        if any(w in words for w in ["chicken", "fish", "meat", "beef", "pork"]):
-            return {"food": meal_description[:50], "calories": 400, "protein": 35,
-                    "carbs": 20, "fat": 15, "fiber": 3,
-                    "serving_assumption": "1 standard serving",
-                    "notes": "Estimated — AI unavailable"}
-        elif any(w in words for w in ["rice", "pasta", "bread", "roti", "chapati"]):
-            return {"food": meal_description[:50], "calories": 350, "protein": 10,
-                    "carbs": 65, "fat": 5, "fiber": 4,
-                    "serving_assumption": "1 standard serving",
-                    "notes": "Estimated — AI unavailable"}
-        else:
-            return {"food": meal_description[:50], "calories": base_cal, "protein": 15,
-                    "carbs": 40, "fat": 10, "fiber": 5,
-                    "serving_assumption": "1 standard serving",
-                    "notes": "Estimated — AI unavailable"}
-
-
 def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int, target_c: int, target_f: int) -> str:
     if not isinstance(plan_data, dict) or "days" not in plan_data:
         return str(plan_data)
@@ -473,7 +415,6 @@ def render_diet_page() -> None:
                 "calories": target_cal,
                 "macros": macros,
                 "diet_type": diet_type,
-                "dietary_preference": diet_type,  # FIX: diet_fallback.filter_db() uses this key
                 "allergies": allergies,
                 "meals_per_day": meals_per_day,
                 "cuisine": cuisine,

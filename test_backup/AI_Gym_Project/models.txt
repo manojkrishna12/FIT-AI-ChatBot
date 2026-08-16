@@ -1,0 +1,91 @@
+=================================================
+  AI Gym & Fitness Assistant — Model References
+=================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  PRIMARY AI MODEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Name     : Gemini 1.5 Flash
+ID       : gemini-1.5-flash
+Provider : Google AI (via google-generativeai SDK)
+Tier     : Free (limited RPM)
+Use cases:
+  • 7-day workout plan generation  (gym_trainer.py)
+  • Real-time form analysis        (gym_trainer.py)
+  • Personalised 7-day meal plans  (diet.py)
+  • Meal nutritional analysis      (diet.py)
+  • Grocery list generation        (diet.py)
+  • Conversational gym buddy chat  (habit_tracker.py)
+  • Mood-aware motivational boost  (habit_tracker.py)
+  • Daily challenge generator      (habit_tracker.py)
+API Key  : Set in sidebar or .env as GEMINI_API_KEY
+Docs     : https://ai.google.dev/docs
+
+Optional upgrade:
+Name     : Gemini 1.5 Pro
+ID       : gemini-1.5-pro
+Tier     : Paid / higher quota
+Change   : Update GEMINI_MODEL in constants.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  COMPUTER VISION MODEL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Name     : MediaPipe Pose (BlazePose)
+ID       : mp.solutions.pose
+Provider : Google / MediaPipe (local, no API key)
+Version  : mediapipe==0.10.11
+Use cases:
+  • 33-point full-body pose landmark detection
+  • Joint angle calculation for 7 exercises
+  • Frame-by-frame rep counting in uploaded videos
+  • Real-time form feedback
+Landmarks used (per exercise):
+  Squat          → LEFT_HIP, LEFT_KNEE, LEFT_ANKLE
+  Bicep Curl     → LEFT_SHOULDER, LEFT_ELBOW, LEFT_WRIST
+  Push-up        → LEFT_SHOULDER, LEFT_ELBOW, LEFT_WRIST
+  Shoulder Press → LEFT_ELBOW, LEFT_SHOULDER, LEFT_HIP
+  Lunge          → LEFT_HIP, LEFT_KNEE, LEFT_ANKLE
+  Deadlift       → LEFT_SHOULDER, LEFT_HIP, LEFT_KNEE
+  Plank          → LEFT_SHOULDER, LEFT_HIP, LEFT_ANKLE
+Docs     : https://developers.google.com/mediapipe/solutions/vision/pose_landmarker
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  DATASETS  (Kaggle)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Exercise Dataset:
+  URL    : https://www.kaggle.com/datasets/niharika41298/gym-exercise-dataset
+  File   : Data/exercises.csv
+  Cols   : Title, Desc, Type, BodyPart, Equipment, Level
+  Size   : ~870 exercises
+
+Nutrition Dataset:
+  URL    : https://www.kaggle.com/datasets/trolukovich/nutritional-values-for-common-foods-and-products
+  File   : Data/nutrition.csv
+  Cols   : name, calories, protein, carbohydrate, total_fat, fiber, …
+  Size   : ~8 789 food items
+
+Note: Both datasets fall back to built-in sample data if CSV files
+      are not present in the Data/ folder.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  SENTIMENT ANALYSIS  (rule-based, no model)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Location : habit_tracker.py → analyze_sentiment()
+Method   : Keyword matching against curated positive / negative word sets
+Output   : "positive" | "negative" | "neutral"
+Purpose  : Detect user mood → trigger mood-aware Gemini responses
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  NUTRITION CALCULATIONS  (formula-based)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+BMI    : weight(kg) / height(m)²
+BMR    : Mifflin-St Jeor Equation
+  Male  : 10w + 6.25h − 5a + 5
+  Female: 10w + 6.25h − 5a − 161
+TDEE   : BMR × activity multiplier
+Macros : Goal-specific protein/carb/fat ratio split
+Location: m.py → calculate_bmi(), calculate_tdee(), macro_split()
+
+=================================================
+  Last updated: Project v1.0
+=================================================

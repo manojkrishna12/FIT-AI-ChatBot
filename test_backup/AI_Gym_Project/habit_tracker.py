@@ -97,68 +97,42 @@ def sentiment_emoji(sentiment: str) -> str:
 
 
 def get_openrouter_response(messages: list[dict], api_key: str) -> str:
-    """Call OpenRouter API safely with a free-model fallback chain."""
-    print(f"[Gym Buddy] OpenRouter key present: {bool(api_key)}, length: {len(api_key) if api_key else 0}")
-
+    """Call OpenRouter API safely."""
+    print(f"[Gym Buddy] OpenRouter key present: {bool(api_key)}")
+    print(f"[Gym Buddy] OpenRouter key length: {len(api_key) if api_key else 0}")
+    print("[Gym Buddy] Provider: OpenRouter")
+    print("[Gym Buddy] Model: openrouter/free")
+    
     if not api_key:
-        return "FitBot is unavailable. Please enter your OpenRouter API key in the sidebar."
-
-    # Ordered list of free models to try — first available wins
-    FREE_MODELS = [
-        "mistralai/mistral-7b-instruct:free",
-        "microsoft/phi-3-mini-128k-instruct:free",
-        "google/gemma-3-1b-it:free",
-        "meta-llama/llama-3.2-1b-instruct:free",
-        "qwen/qwen-2-7b-instruct:free",
-    ]
-
+        return "FitBot is unavailable. Please enter your OpenRouter API key."
+        
     headers = {
         "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://ai-gym-assistant.app",
-        "X-Title": "AI Gym Assistant",
+        "Content-Type": "application/json"
     }
-
-    for model_id in FREE_MODELS:
-        print(f"[Gym Buddy] Trying model: {model_id}")
-        payload = {
-            "model": model_id,
-            "messages": messages,
-        }
-        try:
-            resp = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=25,
-            )
-            print(f"[Gym Buddy] Status: {resp.status_code}")
-
-            if resp.status_code == 401:
-                return "❌ The OpenRouter API key is invalid or unauthorized. Please check your key."
-            elif resp.status_code == 429:
-                print(f"[Gym Buddy] {model_id} rate limited, trying next...")
-                continue
-            elif resp.status_code == 200:
-                data = resp.json()
-                if "choices" in data and len(data["choices"]) > 0:
-                    content = data["choices"][0]["message"]["content"]
-                    if content and content.strip():
-                        print(f"[Gym Buddy] SUCCESS with {model_id}")
-                        return content.strip()
-                print(f"[Gym Buddy] {model_id} returned empty content, trying next...")
-                continue
-            else:
-                print(f"[Gym Buddy] {model_id} returned {resp.status_code}, trying next...")
-                continue
-        except requests.exceptions.Timeout:
-            print(f"[Gym Buddy] {model_id} timed out, trying next...")
-            continue
-        except Exception as e:
-            print(f"[Gym Buddy] {model_id} error: {e}, trying next...")
-            continue
-
-    return "FitBot is temporarily unavailable. All free OpenRouter models are busy. Please try again in a moment."
+    
+    payload = {
+        "model": "openrouter/free",
+        "messages": messages,
+    }
+    
+    try:
+        resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=20)
+        
+        if resp.status_code == 401:
+            return "The OpenRouter API key is invalid or unauthorized."
+        elif resp.status_code == 429:
+            return "The OpenRouter free-model limit has been reached. Please try again later."
+        elif resp.status_code != 200:
+            return "OpenRouter is temporarily unavailable. Please try again."
+            
+        data = resp.json()
+        if "choices" in data and len(data["choices"]) > 0:
+            return data["choices"][0]["message"]["content"]
+        else:
+            return "OpenRouter is temporarily unavailable. Please try again."
+    except Exception:
+        return "OpenRouter is temporarily unavailable. Please try again."
 
 def chat_with_buddy(user_msg: str, history: list[dict]) -> str:
     """Generate a FitBot reply using recent conversation context."""

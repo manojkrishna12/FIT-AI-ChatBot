@@ -1,0 +1,17 @@
+streamlit
+google-genai
+mediapipe==0.10.14
+opencv-python-headless
+Pillow
+pandas
+numpy
+matplotlib
+seaborn
+python-dotenv
+pymongo
+dnspython
+kaggle
+scikit-learn
+altair
+streamlit-webrtc
+av

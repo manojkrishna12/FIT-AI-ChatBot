@@ -242,30 +242,3 @@ def inject_custom_css() -> None:
         """,
         unsafe_allow_html=True,
     )
-
-
-# ── Computer Vision helpers ─────────────────────────────────────────────────────
-
-def calculate_angle(a: list, b: list, c: list) -> float:
-    """Calculate the angle at point B from three 2-D points."""
-    a_arr = np.array(a, dtype=float)
-    b_arr = np.array(b, dtype=float)
-    c_arr = np.array(c, dtype=float)
-    radians = (
-        np.arctan2(c_arr[1] - b_arr[1], c_arr[0] - b_arr[0])
-        - np.arctan2(a_arr[1] - b_arr[1], a_arr[0] - b_arr[0])
-    )
-    angle = np.abs(radians * 180.0 / np.pi)
-    if angle > 180.0:
-        angle = 360.0 - angle
-    return round(angle, 2)
-
-
-def get_landmark_coords(landmarks, landmark_name: str, image_shape: tuple) -> list[float]:
-    """Extract pixel coordinates for a named MediaPipe landmark."""
-    import mediapipe as mp
-
-    landmark_enum = getattr(mp.solutions.pose.PoseLandmark, landmark_name)
-    landmark = landmarks[landmark_enum.value]
-    height, width = image_shape[:2]
-    return [landmark.x * width, landmark.y * height]
