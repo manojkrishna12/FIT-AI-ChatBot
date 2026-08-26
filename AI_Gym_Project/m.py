@@ -139,7 +139,7 @@ def load_nutrition_data() -> pd.DataFrame:
 
 
 @st.cache_data(show_spinner=False)
-def load_workout_data() -> pd.DataFrame:
+def load_exercise_data() -> pd.DataFrame:
     """Load the workout/exercise CSV, returning an empty DataFrame on failure."""
     try:
         df = pd.read_csv(WORKOUT_DATASET_PATH)
