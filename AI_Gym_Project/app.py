@@ -23,12 +23,54 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ── Navigation constants (exact labels must stay in sync with routing) ──
+# ── Navigation constants & routes (target information architecture) ──
+# Labels are the exact sidebar entries; ROUTES maps each label to a dispatch
+# target consumed by main(). Keep all three in sync.
 PAGE_HOME = "🏠 Home"
+
 PAGE_TRAINER = "🏋️ AI Gym Trainer"
+PAGE_EXERCISE_LIBRARY = "📚 Exercise Library"
+PAGE_ROUTINES = "🗓️ Routines"
+
 PAGE_DIET = "🥗 Diet Coach"
+PAGE_MEAL_ANALYSER = "🍽️ Meal Analyser"
+PAGE_GROCERY = "🛒 Grocery List"
+PAGE_CALORIE_TRACKER = "📈 Calorie Tracker"
+
 PAGE_BUDDY = "🤝 Gym Buddy"
-PAGE_OPTIONS = [PAGE_HOME, PAGE_TRAINER, PAGE_DIET, PAGE_BUDDY]
+
+PAGE_PROGRESS = "📊 Progress"
+PAGE_PROFILE = "👤 Profile"
+PAGE_SETTINGS = "⚙️ Settings"
+PAGE_ABOUT = "ℹ️ About"
+
+# Ordered sidebar structure: (group label, [page labels]); None = no header.
+# Grouping is rendered as flat nav for now (single-radio, lowest-risk);
+# visual grouping can layer on top without changing ROUTES.
+NAV_GROUPS: list[tuple[str | None, list[str]]] = [
+    (None, [PAGE_HOME]),
+    ("Training", [PAGE_TRAINER, PAGE_EXERCISE_LIBRARY, PAGE_ROUTINES]),
+    ("Nutrition", [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_GROCERY, PAGE_CALORIE_TRACKER]),
+    ("Coach", [PAGE_BUDDY]),
+    (None, [PAGE_PROGRESS, PAGE_PROFILE, PAGE_SETTINGS, PAGE_ABOUT]),
+]
+PAGE_OPTIONS: list[str] = [label for _, labels in NAV_GROUPS for label in labels]
+
+ROUTES: dict[str, str] = {
+    PAGE_HOME: "home",
+    PAGE_TRAINER: "trainer",
+    PAGE_EXERCISE_LIBRARY: "exercise_library",
+    PAGE_ROUTINES: "routines",
+    PAGE_DIET: "diet",
+    PAGE_MEAL_ANALYSER: "meal_analyser",
+    PAGE_GROCERY: "grocery_list",
+    PAGE_CALORIE_TRACKER: "calorie_tracker",
+    PAGE_BUDDY: "buddy",
+    PAGE_PROGRESS: "progress",
+    PAGE_PROFILE: "profile",
+    PAGE_SETTINGS: "settings",
+    PAGE_ABOUT: "about",
+}
 
 _ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
@@ -184,13 +226,13 @@ def render_home() -> None:
     # ── Fitness Tools: existing Diet Coach tools (small cards) ───────
     st.markdown(TOOLS_HEADING_HTML, unsafe_allow_html=True)
     tools = [
-        ("🥗", "Nutrition", "Personalized 7-day meal plans", "open_nutrition"),
-        ("🍽️", "Meal Analyser", "Instant nutritional breakdown", "open_analyser"),
-        ("📈", "Calorie Tracker", "Log meals, track macros", "open_calories"),
-        ("🛒", "Grocery List", "Weekly shopping lists", "open_grocery"),
+        ("🥗", "Diet Coach", "Personalized 7-day meal plans", "open_nutrition", PAGE_DIET),
+        ("🍽️", "Meal Analyser", "Instant nutritional breakdown", "open_analyser", PAGE_MEAL_ANALYSER),
+        ("📈", "Calorie Tracker", "Log meals, track macros", "open_calories", PAGE_CALORIE_TRACKER),
+        ("🛒", "Grocery List", "Weekly shopping lists", "open_grocery", PAGE_GROCERY),
     ]
     tcols = st.columns(4, gap="medium")
-    for col, (icon, name, desc, key) in zip(tcols, tools):
+    for col, (icon, name, desc, key, target_page) in zip(tcols, tools):
         with col:
             st.markdown(
                 f"""
@@ -203,7 +245,7 @@ def render_home() -> None:
                 unsafe_allow_html=True,
             )
             if st.button("Open →", key=key, use_container_width=True):
-                _navigate(PAGE_DIET)
+                _navigate(target_page)
 
     # ── Quick Start ──────────────────────────────────────────────────
     st.markdown(QUICK_START_HTML, unsafe_allow_html=True)
@@ -285,20 +327,58 @@ def main() -> None:
     ensure_user_state_loaded()
     render_top_header()
 
-    if page == PAGE_HOME:
+    target = ROUTES.get(page, "home")
+
+    if target == "home":
         render_home()
-    elif page == PAGE_TRAINER:
+    elif target == "trainer":
         from gym_trainer import render_gym_trainer_page
 
         render_gym_trainer_page()
-    elif page == PAGE_DIET:
+    elif target == "diet":
         from diet import render_diet_page
 
         render_diet_page()
-    elif page == PAGE_BUDDY:
+    elif target == "buddy":
         from habit_tracker import render_gym_buddy_page
 
         render_gym_buddy_page()
+    elif target == "exercise_library":
+        from library import render_exercise_library_page
+
+        render_exercise_library_page()
+    elif target == "routines":
+        from routines import render_routines_page
+
+        render_routines_page()
+    elif target == "meal_analyser":
+        from nutrition import render_meal_analyser_page
+
+        render_meal_analyser_page()
+    elif target == "grocery_list":
+        from nutrition import render_grocery_list_page
+
+        render_grocery_list_page()
+    elif target == "calorie_tracker":
+        from nutrition import render_calorie_tracker_page
+
+        render_calorie_tracker_page()
+    elif target == "progress":
+        from progress import render_progress_page
+
+        render_progress_page()
+    elif target == "profile":
+        from profile_page import render_profile_page
+
+        render_profile_page()
+    elif target == "settings":
+        from settings_page import render_settings_page
+
+        render_settings_page()
+    elif target == "about":
+        from about import render_about_page
+
+        render_about_page()
 
 
 if __name__ == "__main__":
