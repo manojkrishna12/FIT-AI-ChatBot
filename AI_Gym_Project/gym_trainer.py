@@ -45,6 +45,8 @@ from m import (
     show_metrics_row,
 )
 from storage import append_session_history, save_current_user_state
+from auth import profile_prefill
+from auth import profile_prefill
 from constants import (
     EXERCISE_CONFIG,
     MIN_DETECTION_CONFIDENCE,
@@ -580,10 +582,10 @@ def render_gym_trainer_page() -> None:
         with st.form("workout_form"):
             r1c1, r1c2 = st.columns(2)
             with r1c1:
-                name   = st.text_input("Your Name", "Athlete")
-                age    = st.number_input("Age", 12, 80, 22)
-                weight = st.number_input("Weight (kg)", 30.0, 200.0, 68.0, step=0.5)
-                height = st.number_input("Height (cm)", 100.0, 250.0, 170.0, step=0.5)
+                name   = st.text_input("Your Name", str(profile_prefill("name", "Athlete")))
+                age    = st.number_input("Age", 12, 80, int(profile_prefill("age", 22)))
+                weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile_prefill("weight_kg", 68.0)), step=0.5)
+                height = st.number_input("Height (cm)", 100.0, 250.0, float(profile_prefill("height_cm", 170.0)), step=0.5)
             with r1c2:
                 level   = st.selectbox("Fitness Level", ["Beginner", "Intermediate", "Advanced"])
                 goal    = st.selectbox(

@@ -19,10 +19,41 @@ from m import (
     show_metrics_row,
 )
 from storage import save_current_user_state
+from auth import profile_prefill
 
 
 import json
 import re
+
+DIET_GOALS = [
+    "Weight Loss",
+    "Weight Gain",
+    "Weight Maintenance",
+    "Muscle Building",
+    "Athletic Performance",
+    "General Fitness",
+]
+
+DIET_TYPES = [
+    "No Restriction",
+    "Vegetarian",
+    "Vegan",
+    "Eggitarian",
+    "Keto",
+    "Mediterranean",
+    "Paleo",
+    "Gluten-Free",
+    "Dairy-Free",
+]
+
+
+def _safe_index(options: list, value, default: int = 0) -> int:
+    """Return options.index(value) or default when the value is unknown."""
+    try:
+        return options.index(value)
+    except ValueError:
+        return default
+
 
 def extract_and_parse_json(text: str):
     """Robustly extract and parse JSON from a response, handling markdown fences."""
@@ -418,38 +449,24 @@ def render_diet_page() -> None:
         with st.form("diet_form"):
             left, right = st.columns(2)
             with left:
-                name = st.text_input("Your Name", "User")
-                age = st.number_input("Age", 10, 100, 22)
-                gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-                weight = st.number_input("Weight (kg)", 30.0, 200.0, 65.0, step=0.5)
-                height = st.number_input("Height (cm)", 100.0, 250.0, 168.0, step=0.5)
+                name = st.text_input("Your Name", str(profile_prefill("name", "User")))
+                age = st.number_input("Age", 10, 100, int(profile_prefill("age", 22)))
+                gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=_safe_index(["Male", "Female", "Other"], profile_prefill("gender", "Male")))
+                weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile_prefill("weight_kg", 65.0)), step=0.5)
+                height = st.number_input("Height (cm)", 100.0, 250.0, float(profile_prefill("height_cm", 168.0)), step=0.5)
             with right:
                 goal = st.selectbox(
                     "Primary Goal",
-                    [
-                        "Weight Loss",
-                        "Weight Gain",
-                        "Weight Maintenance",
-                        "Muscle Building",
-                        "Athletic Performance",
-                    ],
+                    DIET_GOALS,
+                    index=_safe_index(DIET_GOALS, profile_prefill("goal", "Weight Loss")),
                 )
-                activity = st.selectbox("Activity Level", list(CALORIE_MULTIPLIERS.keys()))
+                activity = st.selectbox("Activity Level", list(CALORIE_MULTIPLIERS.keys()), index=_safe_index(list(CALORIE_MULTIPLIERS.keys()), profile_prefill("activity", "Moderately Active")))
                 diet_type = st.selectbox(
                     "Dietary Preference",
-                    [
-                        "No Restriction",
-                        "Vegetarian",
-                        "Vegan",
-                        "Eggitarian",
-                        "Keto",
-                        "Mediterranean",
-                        "Paleo",
-                        "Gluten-Free",
-                        "Dairy-Free",
-                    ],
+                    DIET_TYPES,
+                    index=_safe_index(DIET_TYPES, profile_prefill("diet_type", "No Restriction")),
                 )
-                allergies = st.text_input("Allergies / Foods to avoid", "None")
+                allergies = st.text_input("Allergies / Foods to avoid", str(profile_prefill("allergies", "None")))
                 meals_per_day = st.number_input("Meals per day", 2, 6, 4)
                 cuisine = st.text_input("Cuisine preference / Notes (optional)", "Any")
             submitted = st.form_submit_button("🍽️ Generate My Diet Plan", use_container_width=True)
