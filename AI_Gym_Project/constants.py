@@ -41,6 +41,7 @@ NUTRITION_DATASET_PATH = f"{DATA_DIR}/nutrition.csv"  # Kaggle: nutritional-valu
 # ─────────────────────────────────────────────
 EXERCISE_DB_COLLECTION = os.getenv("EXERCISE_DB_COLLECTION", "exercises")
 EXERCISE_IMAGES_BUCKET = os.getenv("EXERCISE_IMAGES_BUCKET", "exercise_images")
+ROUTINES_COLLECTION = os.getenv("ROUTINES_COLLECTION", "routines")
 REPDB_SOURCE_URL = "https://github.com/RepDB/exercise-dataset"
 REPDB_DATASET_URL = "https://exercise-dataset.com/exercises.json"
 REPDB_IMAGES_BASE_URL = "https://raw.githubusercontent.com/RepDB/exercise-dataset/main/"
