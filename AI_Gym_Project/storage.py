@@ -14,12 +14,18 @@ from typing import Any
 import streamlit as st
 
 from constants import (
-    DEFAULT_USER_ID,
-    MONGODB_DB_NAME,
-    MONGODB_SERVER_SELECTION_TIMEOUT_MS,
-    MONGODB_URI,
-    MONGODB_USERS_COLLECTION,
+DEFAULT_USER_ID,
+EXERCISE_DB_COLLECTION,
+EXERCISE_IMAGES_BUCKET,
+MONGODB_DB_NAME,
+MONGODB_SERVER_SELECTION_TIMEOUT_MS,
+MONGODB_URI,
+MONGODB_USERS_COLLECTION,
 )
+try:
+    from gridfs import GridFS
+except ImportError:
+    GridFS = None
 
 try:
     from pymongo import MongoClient
@@ -209,3 +215,31 @@ def save_current_user_state() -> bool:
         upsert=True,
     )
     return True
+
+
+# ════════════════════════════════════════════════════════════════════
+# Generic collection accessor (Phase 2+) — additive layer; the legacy
+# single-document user state above is unchanged.
+# ════════════════════════════════════════════════════════════════════
+
+@lru_cache(maxsize=4)
+def _get_collection(collection_name: str):
+    """Return a MongoDB collection handle by name (shared client)."""
+    return _get_users_collection().database[collection_name]
+
+
+def get_exercises_collection():
+    """Return the shared exercise catalog collection (empty if unreachable)."""
+    try:
+        return _get_collection(EXERCISE_DB_COLLECTION)
+    except Exception:
+        return None
+
+
+def get_exercise_images_bucket():
+    """Return the GridFS bucket for exercise images (None if unreachable)."""
+    try:
+        client = _get_users_collection().database.client
+        return GridFS(client[MONGODB_DB_NAME], collection=EXERCISE_IMAGES_BUCKET)
+    except Exception:
+        return None

@@ -397,6 +397,27 @@ pre {
     margin-top: 2.8rem; letter-spacing: 0.04em;
 }
 
+/* ── Exercise Library (Phase 2) ───────────────────────────────── */
+.ex-card {
+    background: linear-gradient(165deg, #141d31, #0f1626);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 16px; overflow: hidden;
+    display: flex; flex-direction: column;
+    transition: transform 0.16s ease, border-color 0.16s ease;
+    margin-bottom: 0.75rem;
+}
+.ex-card:hover { transform: translateY(-3px); border-color: rgba(255,255,255,0.18); }
+.ex-media { height: 150px; background: #101828; overflow: hidden; }
+.ex-media img { width: 100%; height: 150px; object-fit: cover; display: block; }
+.ex-name { font-size: 0.95rem; font-weight: 700; color: #fff; padding: 0.7rem 0.85rem 0.1rem; }
+.ex-meta { font-size: 0.74rem; color: #8b93a5; padding: 0.1rem 0.85rem 0.8rem; }
+.ex-detail-media { display: flex; gap: 1rem; margin-bottom: 1rem; }
+.ex-detail-media img {
+    width: 260px; height: 260px; object-fit: cover;
+    border-radius: 16px; border: 1px solid rgba(255,255,255,0.1);
+    background: #101828;
+}
+
 /* ── Phase 1: placeholder (stub) pages ────────────────────────── */
 .stub-card {
     background: linear-gradient(165deg, #141d31, #0f1626);

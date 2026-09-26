@@ -7,4 +7,7 @@ __pycache__/
 .pycache_check/
 scratch/
 
+# RepDB dataset is seeded into MongoDB, never committed (see docs/LICENSES.md)
+Data/repdb/
+
 .env
