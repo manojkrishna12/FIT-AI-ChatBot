@@ -27,14 +27,40 @@ MONGODB_DB_NAME = os.getenv("MONGODB_DB_NAME", "ai_gym_assistant")
 MONGODB_USERS_COLLECTION = os.getenv("MONGODB_USERS_COLLECTION", "user_profiles")
 MONGODB_SERVER_SELECTION_TIMEOUT_MS = int(
     os.getenv("MONGODB_SERVER_SELECTION_TIMEOUT_MS", "1500")
-)
+)# ─────────────────────────────────────────────
+# 📁 DATASET PATHS (Kaggle CSVs go in Data/)
+# ─────────────────────────────────────────────
+DATA_DIR = "Data"
+WORKOUT_DATASET_PATH = f"{DATA_DIR}/exercises.csv"  # Kaggle: gym-exercise-dataset
+NUTRITION_DATASET_PATH = f"{DATA_DIR}/nutrition.csv"  # Kaggle: nutritional-values-for-common-foods
 
 # ─────────────────────────────────────────────
-# 📁 DATASET PATHS  (Kaggle CSVs go in Data/)
+# 📚 EXERCISE LIBRARY (RepDB free tier — see docs/LICENSES.md)
+# Data is seeded into MongoDB from a locally downloaded copy of the
+# dataset; nothing RepDB-derived is committed to this repository.
 # ─────────────────────────────────────────────
-DATA_DIR              = "Data"
-WORKOUT_DATASET_PATH  = f"{DATA_DIR}/exercises.csv"       # Kaggle: gym-exercise-dataset
-NUTRITION_DATASET_PATH = f"{DATA_DIR}/nutrition.csv"      # Kaggle: nutritional-values-for-common-foods
+EXERCISE_DB_COLLECTION = os.getenv("EXERCISE_DB_COLLECTION", "exercises")
+EXERCISE_IMAGES_BUCKET = os.getenv("EXERCISE_IMAGES_BUCKET", "exercise_images")
+ROUTINES_COLLECTION = os.getenv("ROUTINES_COLLECTION", "routines")
+USER_ACCOUNTS_COLLECTION = os.getenv("USER_ACCOUNTS_COLLECTION", "users")
+WORKOUT_SESSIONS_COLLECTION = os.getenv("WORKOUT_SESSIONS_COLLECTION", "workout_sessions")
+REPDB_SOURCE_URL = "https://github.com/RepDB/exercise-dataset"
+REPDB_DATASET_URL = "https://exercise-dataset.com/exercises.json"
+REPDB_IMAGES_BASE_URL = "https://raw.githubusercontent.com/RepDB/exercise-dataset/main/"
+REPDB_ATTRIBUTION = "Exercise data by RepDB (repdb.co)"
+# Curated-library filter (deterministic; ~380 of 601 exercises).
+# Extend LIBRARY_EQUIPMENT (e.g. "kettlebell", "ez_bar") and re-run the
+# seed script to widen the catalog.
+LIBRARY_CATEGORIES = ("strength", "stretching")
+LIBRARY_EQUIPMENT = (
+    "bodyweight",
+    "dumbbell",
+    "barbell",
+    "cable",
+    "pull_up_bar",
+    "resistance_band",
+    "flat_bench",
+)
 
 # ─────────────────────────────────────────────
 # 🎥 MEDIAPIPE CONFIGURATION

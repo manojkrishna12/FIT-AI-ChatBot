@@ -14,12 +14,19 @@ from typing import Any
 import streamlit as st
 
 from constants import (
-    DEFAULT_USER_ID,
-    MONGODB_DB_NAME,
-    MONGODB_SERVER_SELECTION_TIMEOUT_MS,
-    MONGODB_URI,
-    MONGODB_USERS_COLLECTION,
+DEFAULT_USER_ID,
+EXERCISE_DB_COLLECTION,
+EXERCISE_IMAGES_BUCKET,
+MONGODB_DB_NAME,
+MONGODB_SERVER_SELECTION_TIMEOUT_MS,
+MONGODB_URI,
+MONGODB_USERS_COLLECTION,
+ROUTINES_COLLECTION,
 )
+try:
+    from gridfs import GridFS
+except ImportError:
+    GridFS = None
 
 try:
     from pymongo import MongoClient
@@ -209,3 +216,112 @@ def save_current_user_state() -> bool:
         upsert=True,
     )
     return True
+
+
+# ════════════════════════════════════════════════════════════════════
+# Generic collection accessor (Phase 2+) — additive layer; the legacy
+# single-document user state above is unchanged.
+# ════════════════════════════════════════════════════════════════════
+
+@lru_cache(maxsize=4)
+def _get_collection(collection_name: str):
+    """Return a MongoDB collection handle by name (shared client)."""
+    return _get_users_collection().database[collection_name]
+
+
+def get_exercises_collection():
+    """Return the shared exercise catalog collection (empty if unreachable)."""
+    try:
+        return _get_collection(EXERCISE_DB_COLLECTION)
+    except Exception:
+        return None
+
+
+def get_exercise_images_bucket():
+    """Return the GridFS bucket for exercise images (None if unreachable)."""
+    try:
+        client = _get_users_collection().database.client
+        return GridFS(client[MONGODB_DB_NAME], collection=EXERCISE_IMAGES_BUCKET)
+    except Exception:
+        return None
+
+
+def get_routines_collection():
+    """Return the user routines collection (None if unreachable)."""
+    try:
+        return _get_collection(ROUTINES_COLLECTION)
+    except Exception:
+        return None
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def list_routines(user_id: str) -> list[dict]:
+    """Return the user's routines, newest first."""
+    coll = get_routines_collection()
+    if coll is None:
+        return []
+    try:
+        return list(coll.find({"user_id": user_id}).sort("updated_at", -1))
+    except Exception:
+        return []
+
+
+def save_routine(user_id: str, routine: dict) -> str | None:
+    """Create or update a routine; returns its id, or None if storage is down."""
+    coll = get_routines_collection()
+    if coll is None:
+        return None
+    now = _now_iso()
+    doc = {
+        "user_id": user_id,
+        "name": (routine.get("name") or "Untitled routine").strip()[:80],
+        "notes": (routine.get("notes") or "").strip()[:500],
+        "days": routine.get("days") or [],
+        "updated_at": now,
+    }
+    routine_id = routine.get("_id")
+    if routine_id:
+        result = coll.update_one(
+            {"_id": routine_id, "user_id": user_id},
+            {"$set": doc},
+        )
+        if result.matched_count == 0:
+            return None
+        return str(routine_id)
+    doc["created_at"] = now
+    result = coll.insert_one(doc)
+    return str(result.inserted_id)
+
+
+def delete_routine(user_id: str, routine_id) -> bool:
+    """Delete one of the user's routines by id."""
+    coll = get_routines_collection()
+    if coll is None:
+        return False
+    from bson import ObjectId
+
+    try:
+        oid = ObjectId(str(routine_id))
+    except Exception:
+        return False
+    result = coll.delete_one({"_id": oid, "user_id": user_id})
+    return result.deleted_count > 0
+
+
+def get_routine(user_id: str, routine_id):
+    """Fetch one of the user's routines by id, or None."""
+    coll = get_routines_collection()
+    if coll is None:
+        return None
+    from bson import ObjectId
+
+    try:
+        oid = ObjectId(str(routine_id))
+    except Exception:
+        return None
+    return coll.find_one({"_id": oid, "user_id": user_id})

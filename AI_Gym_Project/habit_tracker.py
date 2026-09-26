@@ -10,7 +10,6 @@ from datetime import date, datetime
 import streamlit as st
 
 from constants import CHAT_CONTEXT_TURNS, MOTIVATIONAL_QUOTES
-import requests
 from m import page_header, get_gemini_response
 from storage import save_current_user_state
 

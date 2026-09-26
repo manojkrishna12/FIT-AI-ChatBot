@@ -8,3 +8,5 @@ __pycache__/
 scratch/
 chat_history.json
 output images/
+
+*.log
