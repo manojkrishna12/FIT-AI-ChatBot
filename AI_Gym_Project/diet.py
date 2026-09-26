@@ -424,8 +424,8 @@ def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int
     
     return "\n".join(md)
 
-def render_diet_page() -> None:
-    """Render the Diet Coach page."""
+def _page_intro() -> None:
+    """Shared page header and medical disclaimer."""
     page_header(
         "🥗",
         "AI Dietician & Calorie Coach",
@@ -433,298 +433,358 @@ def render_diet_page() -> None:
     )
     st.warning("🩺 **Medical Disclaimer:** The AI Dietician provides general nutrition guidance and is NOT a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider with any questions you may have regarding a medical condition, pregnancy, eating disorder, or specialized diet.")
 
-    model = None
-    
-    tab1, tab2, tab3, tab4 = st.tabs(
-        [
-            "📋 My Diet Plan",
-            "🍽️ Meal Analyser",
-            "🛒 Grocery List",
-            "📈 Calorie Tracker",
-        ]
+
+def _tab1_diet_plan() -> None:
+    """Diet plan tab body (moved verbatim from the former tab layout)."""
+    model = None  # Gemini client; helpers create their own when None
+    st.subheader("Generate Your Personalised 7-Day Meal Plan")
+    with st.form("diet_form"):
+        left, right = st.columns(2)
+        with left:
+            name = st.text_input("Your Name", str(profile_prefill("name", "User")))
+            age = st.number_input("Age", 10, 100, int(profile_prefill("age", 22)))
+            gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=_safe_index(["Male", "Female", "Other"], profile_prefill("gender", "Male")))
+            weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile_prefill("weight_kg", 65.0)), step=0.5)
+            height = st.number_input("Height (cm)", 100.0, 250.0, float(profile_prefill("height_cm", 168.0)), step=0.5)
+        with right:
+            goal = st.selectbox(
+                "Primary Goal",
+                DIET_GOALS,
+                index=_safe_index(DIET_GOALS, profile_prefill("goal", "Weight Loss")),
+            )
+            activity = st.selectbox("Activity Level", list(CALORIE_MULTIPLIERS.keys()), index=_safe_index(list(CALORIE_MULTIPLIERS.keys()), profile_prefill("activity", "Moderately Active")))
+            diet_type = st.selectbox(
+                "Dietary Preference",
+                DIET_TYPES,
+                index=_safe_index(DIET_TYPES, profile_prefill("diet_type", "No Restriction")),
+            )
+            allergies = st.text_input("Allergies / Foods to avoid", str(profile_prefill("allergies", "None")))
+            meals_per_day = st.number_input("Meals per day", 2, 6, 4)
+            cuisine = st.text_input("Cuisine preference / Notes (optional)", "Any")
+        submitted = st.form_submit_button("🍽️ Generate My Diet Plan", use_container_width=True)
+
+    if submitted:
+        if weight <= 0 or height <= 0 or age <= 0:
+            st.error("Please enter valid positive numbers for Age, Weight, and Height.")
+            st.stop()
+            
+        bmi, bmi_cat = calculate_bmi(weight, height)
+        tdee = calculate_tdee(weight, height, age, gender, activity)
+        cal_offset = {
+            "Weight Loss": -500,
+            "Weight Gain": 400,
+            "Muscle Building": 300,
+            "Weight Maintenance": 0,
+            "Athletic Performance": 0,
+        }
+        target_cal = tdee + cal_offset.get(goal, 0)
+        
+        if target_cal < 1200:
+            st.warning("⚠️ **Warning**: Your calculated calorie target is unusually low (below 1200 kcal). We strongly recommend consulting a qualified healthcare professional before starting an extreme calorie-restriction diet. We have adjusted your target to a safer minimum of 1200 kcal for this plan.")
+            target_cal = 1200
+        elif target_cal > 4000:
+            st.warning("⚠️ **Warning**: Your calculated calorie target is very high. Please consult a professional to ensure this is appropriate for you.")
+
+        macros = macro_split(target_cal, goal, weight)
+
+        st.markdown("### Daily Target (Calculated)")
+        st.markdown(f"**Calories**: {target_cal} kcal")
+        st.markdown(f"**Protein**: {macros['Protein (g)']} g")
+        st.markdown(f"**Carbs**: {macros['Carbs (g)']} g")
+        st.markdown(f"**Fat**: {macros['Fat (g)']} g")
+        st.caption("These are calculated targets used as constraints for the AI.")
+        
+        user_data = {
+            "name": name,
+            "age": age,
+            "gender": gender,
+            "weight": weight,
+            "height": height,
+            "bmi": bmi,
+            "bmi_cat": bmi_cat,
+            "activity": activity,
+            "goal": goal,
+            "calories": target_cal,
+            "macros": macros,
+            "diet_type": diet_type,
+            "dietary_preference": diet_type,  # FIX: diet_fallback.filter_db() uses this key
+            "allergies": allergies,
+            "meals_per_day": meals_per_day,
+            "cuisine": cuisine,
+        }
+
+        # Clear stale error session state
+        if "diet_plan_error" in st.session_state:
+            st.session_state.pop("diet_plan_error", None)
+
+        with st.spinner("Building your personalised 7-day meal plan..."):
+            plan_data = ai_diet_plan(user_data, model)
+            
+        if isinstance(plan_data, dict):
+            if plan_data.get("source") == "PYTHON_FALLBACK":
+                st.info("Generated using the built-in nutrition engine because AI generation is temporarily unavailable.")
+            elif plan_data.get("source") == "PYTHON_FALLBACK_FAILED":
+                st.error("Failed to generate diet plan. Please check your inputs and try again.")
+                st.stop()
+
+            plan_md = format_json_plan_to_markdown(
+                plan_data, 
+                target_cal, 
+                macros['Protein (g)'], 
+                macros['Carbs (g)'], 
+                macros['Fat (g)']
+            )
+        else:
+            plan_md = str(plan_data)
+
+        st.success("Your personalised diet plan is ready.")
+        st.markdown(plan_md)
+        st.session_state["diet_plan"] = plan_md
+        st.session_state["calorie_goal"] = target_cal
+        save_current_user_state()
+
+        st.download_button(
+            "📥 Download Diet Plan",
+            plan_md,
+            file_name=f"{name}_diet_plan.txt",
+            mime="text/plain",
+        )
+
+        with st.spinner("Generating a personalised tip..."):
+            tip = ai_nutrition_tip(goal, model)
+        st.success(f"💡 Nutrition Tip: {tip}")
+
+
+def _tab2_meal_analyser() -> None:
+    """Meal analyser tab body (moved verbatim from the former tab layout)."""
+    model = None  # Gemini client; helpers create their own when None
+    st.subheader("🍽️ AI Meal Analyser")
+    st.write("Describe any meal and get an instant nutritional breakdown.")
+
+    meal_input = st.text_area(
+        "Describe your meal",
+        placeholder=(
+            "e.g. 2 scrambled eggs with whole wheat toast, butter, and a glass of orange juice"
+        ),
+        height=110,
     )
 
-    with tab1:
-        st.subheader("Generate Your Personalised 7-Day Meal Plan")
-        with st.form("diet_form"):
-            left, right = st.columns(2)
-            with left:
-                name = st.text_input("Your Name", str(profile_prefill("name", "User")))
-                age = st.number_input("Age", 10, 100, int(profile_prefill("age", 22)))
-                gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=_safe_index(["Male", "Female", "Other"], profile_prefill("gender", "Male")))
-                weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile_prefill("weight_kg", 65.0)), step=0.5)
-                height = st.number_input("Height (cm)", 100.0, 250.0, float(profile_prefill("height_cm", 168.0)), step=0.5)
-            with right:
-                goal = st.selectbox(
-                    "Primary Goal",
-                    DIET_GOALS,
-                    index=_safe_index(DIET_GOALS, profile_prefill("goal", "Weight Loss")),
-                )
-                activity = st.selectbox("Activity Level", list(CALORIE_MULTIPLIERS.keys()), index=_safe_index(list(CALORIE_MULTIPLIERS.keys()), profile_prefill("activity", "Moderately Active")))
-                diet_type = st.selectbox(
-                    "Dietary Preference",
-                    DIET_TYPES,
-                    index=_safe_index(DIET_TYPES, profile_prefill("diet_type", "No Restriction")),
-                )
-                allergies = st.text_input("Allergies / Foods to avoid", str(profile_prefill("allergies", "None")))
-                meals_per_day = st.number_input("Meals per day", 2, 6, 4)
-                cuisine = st.text_input("Cuisine preference / Notes (optional)", "Any")
-            submitted = st.form_submit_button("🍽️ Generate My Diet Plan", use_container_width=True)
+    left, right = st.columns([1, 2])
+    with left:
+        analyse_btn = st.button("🔬 Analyse This Meal", use_container_width=True)
+    with right:
+        if st.button("🎲 Analyse a Random Example", use_container_width=True):
+            meal_input = (
+                "Grilled chicken breast 150g, brown rice 1 cup cooked, steamed broccoli, "
+                "and a drizzle of olive oil"
+            )
+            st.info(f"Analysing: *{meal_input}*")
+            analyse_btn = True
 
-        if submitted:
-            if weight <= 0 or height <= 0 or age <= 0:
-                st.error("Please enter valid positive numbers for Age, Weight, and Height.")
-                st.stop()
-                
-            bmi, bmi_cat = calculate_bmi(weight, height)
-            tdee = calculate_tdee(weight, height, age, gender, activity)
-            cal_offset = {
-                "Weight Loss": -500,
-                "Weight Gain": 400,
-                "Muscle Building": 300,
-                "Weight Maintenance": 0,
-                "Athletic Performance": 0,
-            }
-            target_cal = tdee + cal_offset.get(goal, 0)
-            
-            if target_cal < 1200:
-                st.warning("⚠️ **Warning**: Your calculated calorie target is unusually low (below 1200 kcal). We strongly recommend consulting a qualified healthcare professional before starting an extreme calorie-restriction diet. We have adjusted your target to a safer minimum of 1200 kcal for this plan.")
-                target_cal = 1200
-            elif target_cal > 4000:
-                st.warning("⚠️ **Warning**: Your calculated calorie target is very high. Please consult a professional to ensure this is appropriate for you.")
-
-            macros = macro_split(target_cal, goal, weight)
-
-            st.markdown("### Daily Target (Calculated)")
-            st.markdown(f"**Calories**: {target_cal} kcal")
-            st.markdown(f"**Protein**: {macros['Protein (g)']} g")
-            st.markdown(f"**Carbs**: {macros['Carbs (g)']} g")
-            st.markdown(f"**Fat**: {macros['Fat (g)']} g")
-            st.caption("These are calculated targets used as constraints for the AI.")
-            
-            user_data = {
-                "name": name,
-                "age": age,
-                "gender": gender,
-                "weight": weight,
-                "height": height,
-                "bmi": bmi,
-                "bmi_cat": bmi_cat,
-                "activity": activity,
-                "goal": goal,
-                "calories": target_cal,
-                "macros": macros,
-                "diet_type": diet_type,
-                "dietary_preference": diet_type,  # FIX: diet_fallback.filter_db() uses this key
-                "allergies": allergies,
-                "meals_per_day": meals_per_day,
-                "cuisine": cuisine,
-            }
-
-            # Clear stale error session state
-            if "diet_plan_error" in st.session_state:
-                st.session_state.pop("diet_plan_error", None)
-
-            with st.spinner("Building your personalised 7-day meal plan..."):
-                plan_data = ai_diet_plan(user_data, model)
-                
-            if isinstance(plan_data, dict):
-                if plan_data.get("source") == "PYTHON_FALLBACK":
-                    st.info("Generated using the built-in nutrition engine because AI generation is temporarily unavailable.")
-                elif plan_data.get("source") == "PYTHON_FALLBACK_FAILED":
-                    st.error("Failed to generate diet plan. Please check your inputs and try again.")
-                    st.stop()
-
-                plan_md = format_json_plan_to_markdown(
-                    plan_data, 
-                    target_cal, 
-                    macros['Protein (g)'], 
-                    macros['Carbs (g)'], 
-                    macros['Fat (g)']
-                )
-            else:
-                plan_md = str(plan_data)
-
-            st.success("Your personalised diet plan is ready.")
-            st.markdown(plan_md)
-            st.session_state["diet_plan"] = plan_md
-            st.session_state["calorie_goal"] = target_cal
+    if analyse_btn and meal_input:
+        with st.spinner("Analysing nutritional content..."):
+            analysis = ai_meal_analysis(meal_input, model)
+        st.subheader("Nutritional Analysis")
+        
+        if "temporarily unavailable" in analysis or analysis.startswith("Error:"):
+            st.error(analysis)
+        else:
+            st.markdown(analysis)
             save_current_user_state()
+            
+            if st.button("➕ Add to Today's Calorie Log"):
+                st.session_state.setdefault("calorie_log", []).append(
+                    {"meal": meal_input[:60] + "...", "analysis": analysis}
+                )
+                save_current_user_state()
+                st.success("Added to your calorie log.")
 
+
+def _tab3_grocery_list() -> None:
+    """Grocery list tab body (moved verbatim from the former tab layout)."""
+    model = None  # Gemini client; helpers create their own when None
+    st.subheader("🛒 Smart Grocery List Generator")
+    if st.session_state.get("diet_plan"):
+        st.success("Using your latest generated diet plan.")
+        plan_text = st.session_state["diet_plan"]
+        st.expander("Your meal plan preview").write(plan_text[:1000] + " ...")
+    else:
+        st.info("Generate a diet plan first, or paste a plan below.")
+        plan_text = st.text_area("Paste meal plan here", height=200, key="manual_plan")
+
+    if st.button("🛒 Generate Grocery List", use_container_width=True, key="grocery_btn"):
+        if plan_text:
+            with st.spinner("Building your weekly grocery list..."):
+                groceries = ai_grocery_list(plan_text, model)
+            st.subheader("Your Weekly Grocery List")
+            st.markdown(groceries)
+            save_current_user_state()
             st.download_button(
-                "📥 Download Diet Plan",
-                plan_md,
-                file_name=f"{name}_diet_plan.txt",
+                "📥 Download Grocery List",
+                groceries,
+                file_name="grocery_list.txt",
                 mime="text/plain",
             )
-
-            with st.spinner("Generating a personalised tip..."):
-                tip = ai_nutrition_tip(goal, model)
-            st.success(f"💡 Nutrition Tip: {tip}")
-
-    with tab2:
-        st.subheader("🍽️ AI Meal Analyser")
-        st.write("Describe any meal and get an instant nutritional breakdown.")
-
-        meal_input = st.text_area(
-            "Describe your meal",
-            placeholder=(
-                "e.g. 2 scrambled eggs with whole wheat toast, butter, and a glass of orange juice"
-            ),
-            height=110,
-        )
-
-        left, right = st.columns([1, 2])
-        with left:
-            analyse_btn = st.button("🔬 Analyse This Meal", use_container_width=True)
-        with right:
-            if st.button("🎲 Analyse a Random Example", use_container_width=True):
-                meal_input = (
-                    "Grilled chicken breast 150g, brown rice 1 cup cooked, steamed broccoli, "
-                    "and a drizzle of olive oil"
-                )
-                st.info(f"Analysing: *{meal_input}*")
-                analyse_btn = True
-
-        if analyse_btn and meal_input:
-            with st.spinner("Analysing nutritional content..."):
-                analysis = ai_meal_analysis(meal_input, model)
-            st.subheader("Nutritional Analysis")
-            
-            if "temporarily unavailable" in analysis or analysis.startswith("Error:"):
-                st.error(analysis)
-            else:
-                st.markdown(analysis)
-                save_current_user_state()
-                
-                if st.button("➕ Add to Today's Calorie Log"):
-                    st.session_state.setdefault("calorie_log", []).append(
-                        {"meal": meal_input[:60] + "...", "analysis": analysis}
-                    )
-                    save_current_user_state()
-                    st.success("Added to your calorie log.")
-
-    with tab3:
-        st.subheader("🛒 Smart Grocery List Generator")
-        if st.session_state.get("diet_plan"):
-            st.success("Using your latest generated diet plan.")
-            plan_text = st.session_state["diet_plan"]
-            st.expander("Your meal plan preview").write(plan_text[:1000] + " ...")
         else:
-            st.info("Generate a diet plan first, or paste a plan below.")
-            plan_text = st.text_area("Paste meal plan here", height=200, key="manual_plan")
+            st.warning("Please generate or paste a meal plan first.")
 
-        if st.button("🛒 Generate Grocery List", use_container_width=True, key="grocery_btn"):
-            if plan_text:
-                with st.spinner("Building your weekly grocery list..."):
-                    groceries = ai_grocery_list(plan_text, model)
-                st.subheader("Your Weekly Grocery List")
-                st.markdown(groceries)
-                save_current_user_state()
-                st.download_button(
-                    "📥 Download Grocery List",
-                    groceries,
-                    file_name="grocery_list.txt",
-                    mime="text/plain",
-                )
-            else:
-                st.warning("Please generate or paste a meal plan first.")
 
-    with tab4:
-        st.subheader("📈 Today's Calorie & Macro Tracker")
-        goal_cal = st.session_state.get("calorie_goal", 2000)
-        st.number_input(
-            "Daily Calorie Goal (kcal)",
-            800,
-            5000,
-            goal_cal,
-            key="goal_cal_input",
-            help="Auto-filled from your diet plan, or set manually.",
-        )
+def _tab4_calorie_tracker() -> None:
+    """Calorie tracker tab body (moved verbatim from the former tab layout)."""
+    st.subheader("📈 Today's Calorie & Macro Tracker")
+    goal_cal = st.session_state.get("calorie_goal", 2000)
+    st.number_input(
+        "Daily Calorie Goal (kcal)",
+        800,
+        5000,
+        goal_cal,
+        key="goal_cal_input",
+        help="Auto-filled from your diet plan, or set manually.",
+    )
 
-        st.session_state.setdefault("tracker_entries", [])
-        st.session_state.setdefault("pending_analysis", None)
+    st.session_state.setdefault("tracker_entries", [])
+    st.session_state.setdefault("pending_analysis", None)
 
-        meal_desc = st.text_area("Describe your meal or food", placeholder="e.g. 2 eggs and 2 cups of milk", height=80)
+    meal_desc = st.text_area("Describe your meal or food", placeholder="e.g. 2 eggs and 2 cups of milk", height=80)
+    
+    if st.button("🔍 Analyze Meal", use_container_width=True):
+        if not meal_desc.strip():
+            st.warning("Please enter a meal description.")
+        else:
+            with st.spinner("Analyzing nutrition..."):
+                result = ai_macro_tracker(meal_desc, model)
+                if result:
+                    st.session_state["pending_analysis"] = result
+                else:
+                    st.error("Unable to analyze this meal right now. Please try again.")
+                    st.session_state["pending_analysis"] = None
+
+    if st.session_state.get("pending_analysis"):
+        res = st.session_state["pending_analysis"]
+        st.markdown("### Meal Analysis")
+        st.markdown(f"🍽️ **{res.get('food', meal_desc)}**")
         
-        if st.button("🔍 Analyze Meal", use_container_width=True):
-            if not meal_desc.strip():
-                st.warning("Please enter a meal description.")
+        # Display metrics nicely
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Calories", f"{res.get('calories', 0)} kcal")
+        c2.metric("Protein", f"{res.get('protein', 0)} g")
+        c3.metric("Carbs", f"{res.get('carbs', 0)} g")
+        c4.metric("Fat", f"{res.get('fat', 0)} g")
+        c5.metric("Fiber", f"{res.get('fiber', 0)} g")
+        
+        st.caption(f"*Estimated based on: {res.get('serving_assumption', 'Typical serving sizes')}*")
+        if res.get('notes'):
+            st.caption(f"*{res.get('notes')}*")
+            
+        st.caption("Nutrition values are estimates and can vary by brand, preparation method, and serving size.")
+        
+        if st.button("➕ Add to Today's Log", use_container_width=True):
+            st.session_state["tracker_entries"].append({
+                "Meal": res.get("food", meal_desc),
+                "Calories": res.get("calories", 0),
+                "Protein (g)": res.get("protein", 0),
+                "Carbs (g)": res.get("carbs", 0),
+                "Fat (g)": res.get("fat", 0),
+                "Fiber (g)": res.get("fiber", 0),
+            })
+            st.session_state["pending_analysis"] = None
+            save_current_user_state()
+            st.success("Meal added to today's log!")
+            st.rerun()
+
+    st.markdown("---")
+    if st.session_state["tracker_entries"]:
+        log_df = pd.DataFrame(st.session_state["tracker_entries"])
+        total_cal = log_df["Calories"].sum()
+        total_protein = log_df.get("Protein (g)", pd.Series(dtype=int)).sum()
+        total_carbs = log_df.get("Carbs (g)", pd.Series(dtype=int)).sum()
+        total_fat = log_df.get("Fat (g)", pd.Series(dtype=int)).sum()
+        total_fiber = log_df.get("Fiber (g)", pd.Series(dtype=int)).sum()
+        
+        remaining = st.session_state["goal_cal_input"] - total_cal
+
+        show_metrics_row(
+            {
+                "🔥 Calories Consumed": total_cal,
+                "🎯 Calories Remaining": remaining,
+                "💪 Total Protein": f"{total_protein}g",
+            }
+        )
+        
+        # Show secondary macros
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("🍞 Total Carbs", f"{total_carbs}g")
+        sc2.metric("🥑 Total Fat", f"{total_fat}g")
+        sc3.metric("🥦 Total Fiber", f"{total_fiber}g")
+
+        progress = min(total_cal / max(1, st.session_state["goal_cal_input"]), 1.0)
+        st.progress(progress, text=f"{int(progress * 100)}% of daily goal reached")
+        st.dataframe(log_df, use_container_width=True)
+
+        if st.button("🗑️ Clear Log"):
+            st.session_state["tracker_entries"] = []
+            st.session_state["pending_analysis"] = None
+            save_current_user_state()
+            st.rerun()
+    else:
+        st.info("No entries yet. Analyze and log your meals above.")
+
+
+def render_diet_page() -> None:
+    """Render the combined Diet Coach page (all four tools in sequence)."""
+    _page_intro()
+    _tab1_diet_plan()
+    st.markdown("---")
+    _tab2_meal_analyser()
+    st.markdown("---")
+    _tab3_grocery_list()
+    st.markdown("---")
+    _tab4_calorie_tracker()
+
+
+# ── Cross-page navigation between the Nutrition tools ──────────────────
+# NOTE: labels must mirror the PAGE_* constants in app.py exactly;
+# tests/test_nav_labels.py (Phase 7) asserts they stay in sync.
+
+
+_NUTRITION_PAGE_LABELS = {
+    "diet": "🥗 Diet Coach",
+    "meal_analyser": "🍽️ Meal Analyser",
+    "grocery_list": "🛒 Grocery List",
+    "calorie_tracker": "📈 Calorie Tracker",
+}
+
+
+def _nutrition_footer(current: str) -> None:
+    """Small link bar to move between the standalone nutrition pages."""
+    buttons = st.columns(len(_NUTRITION_PAGE_LABELS))
+    for col, (target, label) in zip(buttons, _NUTRITION_PAGE_LABELS.items()):
+        with col:
+            if target != current:
+                if st.button(label, key=f"nav_foot_{target}", use_container_width=True):
+                    st.session_state["_navigate_to"] = label
+                    st.rerun()
             else:
-                with st.spinner("Analyzing nutrition..."):
-                    result = ai_macro_tracker(meal_desc, model)
-                    if result:
-                        st.session_state["pending_analysis"] = result
-                    else:
-                        st.error("Unable to analyze this meal right now. Please try again.")
-                        st.session_state["pending_analysis"] = None
+                st.button(label, disabled=True, use_container_width=True)
 
-        if st.session_state.get("pending_analysis"):
-            res = st.session_state["pending_analysis"]
-            st.markdown("### Meal Analysis")
-            st.markdown(f"🍽️ **{res.get('food', meal_desc)}**")
-            
-            # Display metrics nicely
-            c1, c2, c3, c4, c5 = st.columns(5)
-            c1.metric("Calories", f"{res.get('calories', 0)} kcal")
-            c2.metric("Protein", f"{res.get('protein', 0)} g")
-            c3.metric("Carbs", f"{res.get('carbs', 0)} g")
-            c4.metric("Fat", f"{res.get('fat', 0)} g")
-            c5.metric("Fiber", f"{res.get('fiber', 0)} g")
-            
-            st.caption(f"*Estimated based on: {res.get('serving_assumption', 'Typical serving sizes')}*")
-            if res.get('notes'):
-                st.caption(f"*{res.get('notes')}*")
-                
-            st.caption("Nutrition values are estimates and can vary by brand, preparation method, and serving size.")
-            
-            if st.button("➕ Add to Today's Log", use_container_width=True):
-                st.session_state["tracker_entries"].append({
-                    "Meal": res.get("food", meal_desc),
-                    "Calories": res.get("calories", 0),
-                    "Protein (g)": res.get("protein", 0),
-                    "Carbs (g)": res.get("carbs", 0),
-                    "Fat (g)": res.get("fat", 0),
-                    "Fiber (g)": res.get("fiber", 0),
-                })
-                st.session_state["pending_analysis"] = None
-                save_current_user_state()
-                st.success("Meal added to today's log!")
-                st.rerun()
 
-        st.markdown("---")
-        if st.session_state["tracker_entries"]:
-            log_df = pd.DataFrame(st.session_state["tracker_entries"])
-            total_cal = log_df["Calories"].sum()
-            total_protein = log_df.get("Protein (g)", pd.Series(dtype=int)).sum()
-            total_carbs = log_df.get("Carbs (g)", pd.Series(dtype=int)).sum()
-            total_fat = log_df.get("Fat (g)", pd.Series(dtype=int)).sum()
-            total_fiber = log_df.get("Fiber (g)", pd.Series(dtype=int)).sum()
-            
-            remaining = st.session_state["goal_cal_input"] - total_cal
 
-            show_metrics_row(
-                {
-                    "🔥 Calories Consumed": total_cal,
-                    "🎯 Calories Remaining": remaining,
-                    "💪 Total Protein": f"{total_protein}g",
-                }
-            )
-            
-            # Show secondary macros
-            sc1, sc2, sc3 = st.columns(3)
-            sc1.metric("🍞 Total Carbs", f"{total_carbs}g")
-            sc2.metric("🥑 Total Fat", f"{total_fat}g")
-            sc3.metric("🥦 Total Fiber", f"{total_fiber}g")
+def render_meal_analyser_page() -> None:
+    """Standalone Meal Analyser page (Diet Coach tool 2)."""
+    _page_intro()
+    _tab2_meal_analyser()
+    _nutrition_footer("meal_analyser")
 
-            progress = min(total_cal / max(1, st.session_state["goal_cal_input"]), 1.0)
-            st.progress(progress, text=f"{int(progress * 100)}% of daily goal reached")
-            st.dataframe(log_df, use_container_width=True)
 
-            if st.button("🗑️ Clear Log"):
-                st.session_state["tracker_entries"] = []
-                st.session_state["pending_analysis"] = None
-                save_current_user_state()
-                st.rerun()
-        else:
-            st.info("No entries yet. Analyze and log your meals above.")
+def render_grocery_list_page() -> None:
+    """Standalone Grocery List page (Diet Coach tool 3)."""
+    _page_intro()
+    _tab3_grocery_list()
+    _nutrition_footer("grocery_list")
+
+
+def render_calorie_tracker_page() -> None:
+    """Standalone Calorie Tracker page (Diet Coach tool 4)."""
+    _page_intro()
+    _tab4_calorie_tracker()
+    _nutrition_footer("calorie_tracker")
