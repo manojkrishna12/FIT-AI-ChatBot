@@ -66,7 +66,7 @@ def extract_and_parse_json(text: str):
         return json.loads(text.strip())
     except json.JSONDecodeError:
         # Fallback for common trailing comma issue
-        text = re.sub(r',\\s*([}\\]])', r'\\1', text)
+        text = re.sub(r',\s*([}\]])', r'\1', text)
         try:
             return json.loads(text.strip())
         except json.JSONDecodeError:
