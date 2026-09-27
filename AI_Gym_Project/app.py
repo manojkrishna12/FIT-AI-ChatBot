@@ -344,7 +344,7 @@ def main() -> None:
 
         render_gym_buddy_page()
     elif target == "exercise_library":
-        from library import render_exercise_library_page
+        from exercise_library import render_exercise_library_page
 
         render_exercise_library_page()
     elif target == "routines":
