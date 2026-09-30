@@ -195,7 +195,6 @@ def _render_detail(doc: dict) -> None:
 def render_exercise_library_page() -> None:
     """Entry point called by app.py for the Exercise Library page."""
     page_header(
-        "📚",
         "Exercise Library",
         "Curated catalog with images, muscles and equipment — licensed open data",
     )

@@ -130,7 +130,6 @@ def _render_profile_form() -> None:
 def render_profile_page() -> None:
     """Entry point called by app.py for the Profile page."""
     page_header(
-        "👤",
         "Profile",
         "Your account and the fitness details that personalize your AI plans",
     )

@@ -155,9 +155,8 @@ def _ensure_welcome_message() -> None:
 def render_gym_buddy_page() -> None:
     """Render the Virtual Gym Buddy page."""
     page_header(
-        "🤝",
-        "Virtual Gym Buddy — FitBot",
-        "Your AI fitness companion: motivator, coach, and friend — all in one",
+        "Gym Buddy",
+        "Your AI fitness companion for motivation, advice and guidance",
     )
 
     _ensure_welcome_message()

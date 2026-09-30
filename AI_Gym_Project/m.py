@@ -21,6 +21,19 @@ from constants import (
     WORKOUT_DATASET_PATH,
 )
 
+# Shared presentation components live in ui.py (design-system helpers only).
+# Re-exported here so the established `from m import page_header` imports
+# across pages keep working unchanged.
+from ui import (  # noqa: F401  (re-exports)
+    card,
+    empty_state,
+    page_header,
+    section_header,
+    section_tabs,
+    stat_card,
+    stat_row,
+)
+
 
 @st.cache_resource(show_spinner=False)
 def _cached_gemini_client(api_key: str) -> genai.Client:
@@ -163,53 +176,26 @@ def search_nutrition_db(query: str, df: pd.DataFrame) -> pd.DataFrame:
 
 # ── UI helpers ──────────────────────────────────────────────────────────────────
 
-def page_header(icon: str, title: str, subtitle: str = "") -> None:
-    """Render a consistent styled page header used across all modules."""
-    subtitle_html = f'<div class="page-head-sub">{subtitle}</div>' if subtitle else ""
-    st.markdown(
-        f"""
-        <div class="page-head">
-          <div class="page-head-icon">{icon}</div>
-          <div>
-            <div class="page-head-title">{title}</div>
-            {subtitle_html}
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+# page_header is provided by ui.py (typography-first: title + optional
+# subtitle, no icon chip) and re-exported above.
 
 
 def render_top_header() -> None:
-    """Render the app-wide top header (welcome message + profile chip)."""
-    raw = st.session_state.get("active_user_id", "") or ""
-    display = "Guest"
-    if raw and raw.strip() and raw.strip().lower() != "guest":
-        display = raw.strip().replace("-", " ").title()
-    initial = display[0].upper()
-    st.markdown(
-        f"""
-        <div class="topbar">
-          <div>
-            <div class="topbar-title">Welcome, {display} 👋</div>
-            <div class="topbar-sub">Your personal AI fitness assistant.</div>
-          </div>
-          <div class="topbar-right">
-            <div class="topbar-avatar">{initial}</div>
-            <div>
-              <div class="topbar-name">{display}</div>
-              <div class="topbar-role">Member</div>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.markdown("---")
+    """Legacy hook kept for app.main() compatibility.
+
+    The app-wide avatar/greeting bar was removed as part of the light design
+    system (chrome de-cluttering); a proper greeting lives on the Home
+    dashboard instead. Callers stay untouched.
+    """
+    return None
 
 
 def show_metrics_row(metrics: dict) -> None:
-    """Render a row of st.metric cards from a {label: value} dict."""
+    """Render a row of st.metric cards from a {label: value} dict.
+
+    Retained: actively used by the diet and trainer pages. New surfaces
+    should prefer ui.stat_row for the quieter bordered stat blocks.
+    """
     cols = st.columns(len(metrics))
     for col, (label, value) in zip(cols, metrics.items()):
         col.metric(label, value)
@@ -231,28 +217,6 @@ def inject_custom_css() -> None:
     """Inject the shared FitAI design system (dark, premium, unified accent)."""
     st.markdown(f"<style>{_load_stylesheet()}</style>", unsafe_allow_html=True)
 
-
-def render_placeholder_page(
-    icon: str,
-    title: str,
-    subtitle: str,
-    description: str,
-    planned: list[str],
-) -> None:
-    """Render a styled placeholder page for a section planned in a later phase."""
-    page_header(icon, title, subtitle)
-    items_html = "".join(f"<div>•&nbsp; {item}</div>" for item in planned)
-    st.markdown(
-        f"""
-        <div class="stub-card">
-          <div class="stub-chip">🚧 Coming in a future phase</div>
-          <div class="stub-title">{title}</div>
-          <div class="stub-desc">{description}</div>
-          <div class="stub-list">{items_html}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
 
 
 

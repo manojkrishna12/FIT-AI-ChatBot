@@ -211,7 +211,6 @@ def _render_builder(catalog: list[dict]) -> None:
 def render_routines_page() -> None:
     """Entry point called by app.py for the Routines page."""
     page_header(
-        "🗓️",
         "Routines",
         "Compose multi-day workout routines from the Exercise Library",
     )

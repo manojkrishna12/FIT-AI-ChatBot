@@ -452,8 +452,8 @@ End with a weekly summary and top motivational note.
 
 def render_gym_trainer_page() -> None:
     """Entry point called by app.py for the Gym Trainer page."""
-    page_header("🏋️", "AI Gym Trainer",
-                "Upload a photo or video — get instant pose analysis, rep counts & AI coaching")
+    page_header("AI Gym Trainer",
+                "Upload a photo or video — get instant pose analysis, rep counts and AI coaching")
 
     model       = None
     exercise_df = load_exercise_data()

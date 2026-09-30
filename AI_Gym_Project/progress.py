@@ -251,7 +251,6 @@ def _render_charts(sessions: list[dict]) -> None:
 def render_progress_page() -> None:
     """Entry point called by app.py for the Progress page."""
     page_header(
-        "📊",
         "Progress",
         "Log workouts and watch consistency turn into momentum",
     )

@@ -427,9 +427,8 @@ def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int
 def _page_intro() -> None:
     """Shared page header and medical disclaimer."""
     page_header(
-        "🥗",
-        "AI Dietician & Calorie Coach",
-        "Your personal nutritionist — meal plans, calorie tracking, and food insights",
+        "Diet Coach",
+        "Meal plans, calorie tracking, and food insights",
     )
     st.warning("🩺 **Medical Disclaimer:** The AI Dietician provides general nutrition guidance and is NOT a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider with any questions you may have regarding a medical condition, pregnancy, eating disorder, or specialized diet.")
 

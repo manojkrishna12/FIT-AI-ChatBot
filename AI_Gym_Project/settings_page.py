@@ -18,7 +18,6 @@ from storage import get_storage_status
 def render_settings_page() -> None:
     """Entry point called by app.py for the Settings page."""
     page_header(
-        "⚙️",
         "Settings",
         "Session, integrations and data overview",
     )
