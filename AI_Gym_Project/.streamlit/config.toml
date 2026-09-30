@@ -1,0 +1,10 @@
+# Streamlit theme — mirrors assets/styles.css tokens (Phase 1 Step 1).
+# Baseweb components (checkbox, toggle, slider, radio, select focus)
+# take their primary color from here, not from CSS.
+[theme]
+base = "light"
+primaryColor = "#1A7F4B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F6F7F9"
+textColor = "#111827"
+font = "sans serif"

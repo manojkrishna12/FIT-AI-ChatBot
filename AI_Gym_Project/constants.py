@@ -174,10 +174,10 @@ MOTIVATIONAL_QUOTES = [
 ]
 
 # ─────────────────────────────────────────────
-# 🎨 UI THEME
+# UI THEME (mirrors assets/styles.css tokens)
 # ─────────────────────────────────────────────
-PRIMARY_COLOR   = "#FF6B35"
-SECONDARY_COLOR = "#1E1E2E"
-ACCENT_COLOR    = "#00D4FF"
-SUCCESS_COLOR   = "#00C851"
-WARNING_COLOR   = "#FFBB33"
+PRIMARY_COLOR   = "#1A7F4B"
+SECONDARY_COLOR = "#F6F7F9"
+ACCENT_COLOR    = "#1A7F4B"
+SUCCESS_COLOR   = "#1A7F4B"
+WARNING_COLOR   = "#B45309"
