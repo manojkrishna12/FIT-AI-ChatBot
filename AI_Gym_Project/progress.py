@@ -13,7 +13,7 @@ from datetime import date, datetime, timezone
 import pandas as pd
 import streamlit as st
 
-from m import page_header
+from m import page_header, section_header
 from storage import (
     delete_routine,
     get_active_user_id,
@@ -21,6 +21,7 @@ from storage import (
     get_routines_collection,
     list_routines,
 )
+from ui import empty_state, stat_row
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -124,7 +125,7 @@ def _session_editor(default_name: str = "", preset: dict | None = None) -> dict 
                 rest = st.text_input("Rest", value=str(exercise.get("rest") or ""), key=f"se_rest_{idx}", label_visibility="collapsed")
             edited.append({"exercise_name": ename.strip()[:80], "sets": int(sets), "reps": reps.strip()[:20], "rest": rest.strip()[:20]})
 
-        submitted = st.form_submit_button("💾 Log workout", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Log workout", type="primary", use_container_width=True)
 
     if not submitted:
         return None
@@ -145,8 +146,8 @@ def _render_logging() -> None:
             _save_and_toast(user_id, session)
         return
 
-    mode = st.radio("Log from", ["✍️ Custom workout", "🗓️ From a routine"], horizontal=True, key="log_mode")
-    if mode.startswith("🗓"):
+    mode = st.radio("Log from", ["Custom workout", "From a routine"], horizontal=True, key="log_mode")
+    if mode == "From a routine":
         routine = st.selectbox(
             "Routine",
             routines,
@@ -177,7 +178,7 @@ def _render_logging() -> None:
 
 def _save_and_toast(user_id: str, session: dict) -> None:
     if save_session(user_id, session):
-        st.toast("Workout logged!", icon="💪")
+        st.toast("Workout logged.")
         st.rerun()
     else:
         st.error("Storage unavailable — the workout could not be logged. Check MongoDB.")
@@ -185,34 +186,66 @@ def _save_and_toast(user_id: str, session: dict) -> None:
 
 def _render_history(sessions: list[dict]) -> None:
     user_id = get_active_user_id()
-    st.subheader("History")
+    section_header("History")
     if not sessions:
-        st.info("No workouts logged yet.")
+        empty_state(
+            "No workouts logged yet",
+            "Log your first session above — history, volume and streaks build from here.",
+        )
         return
     for session in sessions[:20]:
         date_str = session.get("date", "?")
         n_ex = len(session.get("exercises") or [])
         volume = _session_volume(session)
         with st.container(border=True):
-            row = st.columns([4, 2, 1])
+            row = st.columns([4, 1.4, 1])
             with row[0]:
-                st.markdown(f"**{session.get('name', 'Workout')}** — {date_str}")
+                st.markdown(f"**{session.get('name', 'Workout')}**")
                 names = ", ".join(e.get("exercise_name", "?") for e in (session.get("exercises") or [])[:4])
-                more = "…" if n_ex > 4 else ""
-                st.caption(f"{n_ex} exercise(s) · {names}{more}")
+                more = " …" if n_ex > 4 else ""
+                st.caption(f"{date_str} · {n_ex} exercise{'s' if n_ex != 1 else ''} · {names}{more}")
             with row[1]:
-                st.metric("Volume (sets×reps)", f"{volume:.0f}")
+                st.markdown(
+                    f"<div class='stat-inline'><span class='stat-inline-label'>Volume</span>"
+                    f"<span class='stat-inline-value'>{volume:.0f}</span></div>",
+                    unsafe_allow_html=True,
+                )
             with row[2]:
-                if st.button("🗑", key=f"del_sess_{session['_id']}"):
+                if st.button("Delete", key=f"del_sess_{session['_id']}", use_container_width=True):
                     delete_session(user_id, session["_id"])
                     st.rerun()
 
 
 def _render_charts(sessions: list[dict]) -> None:
+    if not sessions:
+        return
+
+    # Summary block — real data only, rendered even for a single session.
+    dates = sorted({s.get("date") for s in sessions if s.get("date")})
+    best = current = 0
+    prev = None
+    from datetime import timedelta
+
+    for d in dates:
+        day = date.fromisoformat(d)
+        current = current + 1 if (prev and (day - prev).days == 1) else 1
+        best = max(best, current)
+        prev = day
+    today = date.today()
+    last = date.fromisoformat(dates[-1]) if dates else None
+    active = bool(last and 0 <= (today - last).days <= 1)
+    total_volume = sum(_session_volume(s) for s in sessions)
+    stat_row([
+        {"label": "Sessions logged", "value": str(len(sessions))},
+        {"label": "Current streak", "value": f"{current if active else 0}", "hint": "consecutive days"},
+        {"label": "Longest streak", "value": f"{best}", "hint": "consecutive days"},
+        {"label": "Total volume", "value": f"{total_volume:,.0f}", "hint": "sets × reps"},
+    ])
+
     if len(sessions) < 2:
         return
 
-    st.subheader("Trends")
+    section_header("Trends")
     frame = pd.DataFrame(
         [
             {"date": s.get("date", ""), "volume": _session_volume(s), "exercises": len(s.get("exercises") or [])}
@@ -228,38 +261,21 @@ def _render_charts(sessions: list[dict]) -> None:
         st.line_chart(frame.set_index("date")["exercises"], height=220)
         st.caption("Exercises per session")
 
-    # Streak: consecutive-day runs over all logged sessions.
-    dates = sorted({s.get("date") for s in sessions if s.get("date")})
-    best = current = 0
-    prev = None
-    from datetime import timedelta
-
-    for d in dates:
-        day = date.fromisoformat(d)
-        current = current + 1 if (prev and (day - prev).days == 1) else 1
-        best = max(best, current)
-        prev = day
-    today = date.today()
-    last = date.fromisoformat(dates[-1]) if dates else None
-    active = bool(last and 0 <= (today - last).days <= 1)
-    c1, c2, c3 = st.columns(3)
-    c1.metric("🔥 Current streak (sessions)", f"{current if active else 0} day(s)")
-    c2.metric("🏆 Longest streak", f"{best} day(s)")
-    c3.metric("📅 Sessions logged", len(sessions))
-
 
 def render_progress_page() -> None:
     """Entry point called by app.py for the Progress page."""
     page_header(
         "Progress",
-        "Log workouts and watch consistency turn into momentum",
+        "Workout history, consistency and training volume",
     )
 
     user_id = get_active_user_id()
     sessions = list_sessions(user_id)
     _render_charts(sessions)
-    st.markdown("---")
-    with st.expander("➕ Log a workout", expanded=not sessions):
-        _render_logging()
-    st.markdown("---")
+
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+    section_header("Log a workout")
+    _render_logging()
+
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
     _render_history(sessions)

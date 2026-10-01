@@ -16,10 +16,12 @@ from m import (
     get_gemini_response,
     macro_split,
     page_header,
-    show_metrics_row,
+    section_header,
+    stat_row,
 )
 from storage import save_current_user_state
 from auth import profile_prefill
+from ui import empty_state
 
 
 import json
@@ -241,8 +243,8 @@ CRITICAL:
         return "AI service is temporarily unavailable. Please try again in a moment."
 
 
-def ai_meal_analysis(meal_description: str, model=None) -> str:
-    """Generate a nutrition breakdown for a meal using JSON."""
+def ai_meal_analysis_structured(meal_description: str, model=None) -> dict | None:
+    """Generate a nutrition breakdown for a meal; structured dict, None if unavailable."""
     prompt = f"""Analyze this meal and return ONLY a valid JSON object (no markdown formatting, no extra text).
 Meal: {meal_description}
 
@@ -260,42 +262,38 @@ Use realistic estimated values. All numeric fields must be integers.
 """
     try:
         resp = get_gemini_response(prompt)
-        
-        if resp.startswith("Error: The Gemini API key"):
-            return resp
 
-        if not resp or "unavailable" in resp.lower() or "failed" in resp.lower() or "api key" in resp.lower():
-            return "Meal analysis is temporarily unavailable. Please try again."
+        if not resp or resp.startswith("Error:") or "unavailable" in resp.lower() or "failed" in resp.lower() or "api key" in resp.lower():
+            return None
 
-        import json, re
-        text = resp.strip()
-        if "```json" in text:
-            text = text.split("```json")[1].split("```")[0]
-        elif "```" in text:
-            text = text.split("```")[1].split("```")[0]
-            
-        try:
-            data = json.loads(text.strip())
-        except json.JSONDecodeError:
-            text = re.sub(r',\s*([}\]])', r'\1', text)
-            try:
-                data = json.loads(text.strip())
-            except json.JSONDecodeError:
-                return "Meal analysis is temporarily unavailable. Please try again."
-
-        md = [
-            f"**Estimated Calories**: {data.get('calories', 0)} kcal",
-            f"**Protein**: {data.get('protein', 0)} g",
-            f"**Carbs**: {data.get('carbs', 0)} g",
-            f"**Fat**: {data.get('fat', 0)} g",
-            f"**Fiber**: {data.get('fiber', 0)} g",
-            "",
-            f"*Serving Assumption*: {data.get('serving_assumption', 'Typical serving size')}",
-            f"*Note*: {data.get('notes', '')}"
-        ]
-        return "\n".join(md)
+        data = extract_and_parse_json(resp)
+        if not isinstance(data, dict) or "calories" not in data:
+            return None
+        data.setdefault("protein", 0)
+        data.setdefault("carbs", 0)
+        data.setdefault("fat", 0)
+        data.setdefault("fiber", 0)
+        data.setdefault("serving_assumption", "1 standard serving")
+        data.setdefault("notes", "")
+        return data
     except Exception:
+        return None
+
+
+def ai_meal_analysis(meal_description: str, model=None) -> str:
+    """Legacy plain-text meal analysis (kept for compatibility)."""
+    data = ai_meal_analysis_structured(meal_description, model)
+    if data is None:
         return "Meal analysis is temporarily unavailable. Please try again."
+    return (
+        f"**Estimated Calories**: {data.get('calories', 0)} kcal\n\n"
+        f"**Protein**: {data.get('protein', 0)} g\n\n"
+        f"**Carbs**: {data.get('carbs', 0)} g\n\n"
+        f"**Fat**: {data.get('fat', 0)} g\n\n"
+        f"**Fiber**: {data.get('fiber', 0)} g\n\n"
+        f"*Serving Assumption*: {data.get('serving_assumption', 'Typical serving size')}\n\n"
+        f"*Note*: {data.get('notes', '')}"
+    )
 
 
 def ai_nutrition_tip(goal: str, model=None) -> str:
@@ -367,16 +365,16 @@ Use realistic estimated values. All numeric fields must be integers."""
 
 
 def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int, target_c: int, target_f: int) -> str:
+    """Render a structured 7-day plan as clean markdown with daily target checks."""
     if not isinstance(plan_data, dict) or "days" not in plan_data:
         return str(plan_data)
-        
+
     md = []
     for day in plan_data.get("days", []):
-        md.append(f"## Day {day.get('day', 'Unknown')}")
         daily_cal = daily_p = daily_c = daily_f = 0
+        meals_md = []
         for meal in day.get("meals", []):
             name = meal.get("name", meal.get("meal_name", "Meal"))
-            items = ""
             if "foods" in meal:
                 items = ", ".join([f"{f.get('item', '')} ({f.get('quantity', '')})" for f in meal.get("foods", [])])
             else:
@@ -384,44 +382,32 @@ def format_json_plan_to_markdown(plan_data: dict, target_cal: int, target_p: int
                 serving = meal.get("serving_size", "")
                 if serving:
                     items += f" ({serving})"
-                    
+
             cals = int(meal.get("calories", 0))
             p = int(meal.get("protein", 0))
             c = int(meal.get("carbs", meal.get("carbohydrates", 0)))
             f = int(meal.get("fat", 0))
-            
+
             daily_cal += cals
             daily_p += p
             daily_c += c
             daily_f += f
-            
-            md.append(f"#### {name}")
-            md.append(f"- **Items**: {items}")
-            md.append(f"- *Estimates: {cals} kcal | {p}g protein | {c}g carbs | {f}g fat*")
-        
-        md.append("\n**Target vs Planned**\n")
-        
-        md.append("Calories:")
-        md.append(f"Target {target_cal}")
-        md.append(f"Planned {daily_cal}")
-        md.append(f"Difference {daily_cal - target_cal}\n")
-        
-        md.append("Protein:")
-        md.append(f"Target {target_p} g")
-        md.append(f"Planned {daily_p} g")
-        md.append(f"Difference {daily_p - target_p} g\n")
 
-        md.append("Carbs:")
-        md.append(f"Target {target_c} g")
-        md.append(f"Planned {daily_c} g")
-        md.append(f"Difference {daily_c - target_c} g\n")
+            meals_md.append(
+                f"**{name}** — {items}  \n"
+                f"<span class='meal-macros'>{cals} kcal · {p} g protein · {c} g carbs · {f} g fat</span>"
+            )
 
-        md.append("Fat:")
-        md.append(f"Target {target_f} g")
-        md.append(f"Planned {daily_f} g")
-        md.append(f"Difference {daily_f - target_f} g\n")
-        md.append("---")
-    
+        md.append(f"### Day {day.get('day', '?')}")
+        md.extend(m for m in meals_md)
+        md.append("")
+        md.append(
+            f"<span class='day-total'>Day total: {daily_cal} kcal · {daily_p} g protein · "
+            f"{daily_c} g carbs · {daily_f} g fat — target {target_cal} kcal · {target_p} g · "
+            f"{target_c} g · {target_f} g (Δ kcal {daily_cal - target_cal:+d})</span>"
+        )
+        md.append("")
+
     return "\n".join(md)
 
 def _page_intro() -> None:
@@ -430,13 +416,17 @@ def _page_intro() -> None:
         "Diet Coach",
         "Meal plans, calorie tracking, and food insights",
     )
-    st.warning("🩺 **Medical Disclaimer:** The AI Dietician provides general nutrition guidance and is NOT a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider with any questions you may have regarding a medical condition, pregnancy, eating disorder, or specialized diet.")
+    st.warning(
+        "**Medical disclaimer:** This tool provides general nutrition guidance only and is not "
+        "medical advice. Consult a qualified healthcare provider about any medical condition "
+        "or specialized diet."
+    )
 
 
 def _tab1_diet_plan() -> None:
-    """Diet plan tab body (moved verbatim from the former tab layout)."""
+    """Diet plan tool (page body)."""
     model = None  # Gemini client; helpers create their own when None
-    st.subheader("Generate Your Personalised 7-Day Meal Plan")
+    section_header("Your 7-day meal plan", "Personalised targets and a full week of meals")
     with st.form("diet_form"):
         left, right = st.columns(2)
         with left:
@@ -460,7 +450,7 @@ def _tab1_diet_plan() -> None:
             allergies = st.text_input("Allergies / Foods to avoid", str(profile_prefill("allergies", "None")))
             meals_per_day = st.number_input("Meals per day", 2, 6, 4)
             cuisine = st.text_input("Cuisine preference / Notes (optional)", "Any")
-        submitted = st.form_submit_button("🍽️ Generate My Diet Plan", use_container_width=True)
+        submitted = st.form_submit_button("Generate diet plan", use_container_width=True)
 
     if submitted:
         if weight <= 0 or height <= 0 or age <= 0:
@@ -486,12 +476,13 @@ def _tab1_diet_plan() -> None:
 
         macros = macro_split(target_cal, goal, weight)
 
-        st.markdown("### Daily Target (Calculated)")
-        st.markdown(f"**Calories**: {target_cal} kcal")
-        st.markdown(f"**Protein**: {macros['Protein (g)']} g")
-        st.markdown(f"**Carbs**: {macros['Carbs (g)']} g")
-        st.markdown(f"**Fat**: {macros['Fat (g)']} g")
-        st.caption("These are calculated targets used as constraints for the AI.")
+        section_header("Daily target")
+        st.markdown(
+            f"<span class='meal-macros'>{target_cal} kcal · {macros['Protein (g)']} g protein · "
+            f"{macros['Carbs (g)']} g carbs · {macros['Fat (g)']} g fat</span> — calculated targets "
+            "used as constraints for the plan.",
+            unsafe_allow_html=True,
+        )
         
         user_data = {
             "name": name,
@@ -521,23 +512,22 @@ def _tab1_diet_plan() -> None:
             
         if isinstance(plan_data, dict):
             if plan_data.get("source") == "PYTHON_FALLBACK":
-                st.info("Generated using the built-in nutrition engine because AI generation is temporarily unavailable.")
+                st.info("Generated with the built-in nutrition engine because AI generation is temporarily unavailable.")
             elif plan_data.get("source") == "PYTHON_FALLBACK_FAILED":
                 st.error("Failed to generate diet plan. Please check your inputs and try again.")
                 st.stop()
 
             plan_md = format_json_plan_to_markdown(
-                plan_data, 
-                target_cal, 
-                macros['Protein (g)'], 
-                macros['Carbs (g)'], 
+                plan_data,
+                target_cal,
+                macros['Protein (g)'],
+                macros['Carbs (g)'],
                 macros['Fat (g)']
             )
         else:
             plan_md = str(plan_data)
 
-        st.success("Your personalised diet plan is ready.")
-        st.markdown(plan_md)
+        st.markdown('<div class="plan-output">' + plan_md + "</div>", unsafe_allow_html=True)
         st.session_state["diet_plan"] = plan_md
         st.session_state["calorie_goal"] = target_cal
         save_current_user_state()
@@ -551,14 +541,25 @@ def _tab1_diet_plan() -> None:
 
         with st.spinner("Generating a personalised tip..."):
             tip = ai_nutrition_tip(goal, model)
-        st.success(f"💡 Nutrition Tip: {tip}")
+        st.info(f"**Nutrition tip:** {tip}")
+
+
+_EXAMPLE_MEAL = (
+    "Grilled chicken breast 150g, brown rice 1 cup cooked, steamed broccoli, "
+    "and a drizzle of olive oil"
+)
+
+
+def _fill_meal_example() -> None:
+    """on_click callback: seeds the meal box before widgets instantiate."""
+    st.session_state["meal_input"] = _EXAMPLE_MEAL
+    st.session_state["meal_analyser_autorun"] = True
 
 
 def _tab2_meal_analyser() -> None:
-    """Meal analyser tab body (moved verbatim from the former tab layout)."""
+    """Meal analyser tool (page body)."""
     model = None  # Gemini client; helpers create their own when None
-    st.subheader("🍽️ AI Meal Analyser")
-    st.write("Describe any meal and get an instant nutritional breakdown.")
+    section_header("Meal analyser", "Describe a meal and get its nutritional breakdown")
 
     meal_input = st.text_area(
         "Describe your meal",
@@ -566,60 +567,82 @@ def _tab2_meal_analyser() -> None:
             "e.g. 2 scrambled eggs with whole wheat toast, butter, and a glass of orange juice"
         ),
         height=110,
+        key="meal_input",
     )
 
     left, right = st.columns([1, 2])
     with left:
-        analyse_btn = st.button("🔬 Analyse This Meal", use_container_width=True)
+        analyse_btn = st.button("Analyse meal", type="primary", use_container_width=True, key="analyse_meal_btn")
     with right:
-        if st.button("🎲 Analyse a Random Example", use_container_width=True):
-            meal_input = (
-                "Grilled chicken breast 150g, brown rice 1 cup cooked, steamed broccoli, "
-                "and a drizzle of olive oil"
-            )
-            st.info(f"Analysing: *{meal_input}*")
-            analyse_btn = True
+        st.button("Analyse an example", use_container_width=True, key="random_meal_btn", on_click=_fill_meal_example)
+
+    if st.session_state.pop("meal_analyser_autorun", False) and st.session_state.get("meal_input"):
+        analyse_btn = True
 
     if analyse_btn and meal_input:
         with st.spinner("Analysing nutritional content..."):
-            analysis = ai_meal_analysis(meal_input, model)
-        st.subheader("Nutritional Analysis")
-        
-        if "temporarily unavailable" in analysis or analysis.startswith("Error:"):
-            st.error(analysis)
-        else:
-            st.markdown(analysis)
+            result = ai_meal_analysis_structured(meal_input, model)
+        if result is not None:
+            st.session_state["pending_meal_analysis"] = result
             save_current_user_state()
-            
-            if st.button("➕ Add to Today's Calorie Log"):
-                st.session_state.setdefault("calorie_log", []).append(
-                    {"meal": meal_input[:60] + "...", "analysis": analysis}
-                )
-                save_current_user_state()
-                st.success("Added to your calorie log.")
+        else:
+            st.session_state.pop("pending_meal_analysis", None)
+
+    result = st.session_state.get("pending_meal_analysis")
+    if result is not None:
+        section_header("Nutritional analysis")
+        stat_row([
+            {"label": "Calories", "value": f"{result.get('calories', 0)}"},
+            {"label": "Protein", "value": f"{result.get('protein', 0)} g"},
+            {"label": "Carbs", "value": f"{result.get('carbs', 0)} g"},
+            {"label": "Fat", "value": f"{result.get('fat', 0)} g"},
+            {"label": "Fiber", "value": f"{result.get('fiber', 0)} g"},
+        ])
+        st.caption(
+            f"Serving assumption: {result.get('serving_assumption', 'typical serving size')}"
+            + (f" · {result['notes']}" if result.get("notes") else "")
+        )
+        st.caption("Nutrition values are estimates and can vary by brand, preparation and serving size.")
+
+        if st.button("Add to today's log", key="add_meal_to_log"):
+            st.session_state.setdefault("calorie_log", []).append(
+                {"meal": meal_input[:60] + "...", "analysis": "meal analysis"}
+            )
+            st.session_state.setdefault("tracker_entries", []).append({
+                "Meal": meal_input[:60] + "...",
+                "Calories": int(result.get("calories", 0) or 0),
+                "Protein (g)": int(result.get("protein", 0) or 0),
+                "Carbs (g)": int(result.get("carbs", 0) or 0),
+                "Fat (g)": int(result.get("fat", 0) or 0),
+                "Fiber (g)": int(result.get("fiber", 0) or 0),
+            })
+            st.session_state.pop("pending_meal_analysis", None)
+            save_current_user_state()
+            st.toast("Added to today's log.")
+            st.rerun()
 
 
 def _tab3_grocery_list() -> None:
-    """Grocery list tab body (moved verbatim from the former tab layout)."""
+    """Grocery list tool (page body)."""
     model = None  # Gemini client; helpers create their own when None
-    st.subheader("🛒 Smart Grocery List Generator")
+    section_header("Grocery list", "A weekly shopping list from your meal plan")
     if st.session_state.get("diet_plan"):
-        st.success("Using your latest generated diet plan.")
+        with st.expander("Your latest meal plan", expanded=False):
+            st.markdown(st.session_state["diet_plan"][:1000] + " …")
         plan_text = st.session_state["diet_plan"]
-        st.expander("Your meal plan preview").write(plan_text[:1000] + " ...")
     else:
-        st.info("Generate a diet plan first, or paste a plan below.")
+        st.info("Generate a diet plan first, or paste one below.")
         plan_text = st.text_area("Paste meal plan here", height=200, key="manual_plan")
 
-    if st.button("🛒 Generate Grocery List", use_container_width=True, key="grocery_btn"):
+    if st.button("Generate grocery list", type="primary", use_container_width=True, key="grocery_btn"):
         if plan_text:
             with st.spinner("Building your weekly grocery list..."):
                 groceries = ai_grocery_list(plan_text, model)
-            st.subheader("Your Weekly Grocery List")
-            st.markdown(groceries)
+            section_header("Your weekly grocery list")
+            st.markdown('<div class="plan-output">' + groceries + "</div>", unsafe_allow_html=True)
             save_current_user_state()
             st.download_button(
-                "📥 Download Grocery List",
+                "Download grocery list",
                 groceries,
                 file_name="grocery_list.txt",
                 mime="text/plain",
@@ -629,8 +652,8 @@ def _tab3_grocery_list() -> None:
 
 
 def _tab4_calorie_tracker() -> None:
-    """Calorie tracker tab body (moved verbatim from the former tab layout)."""
-    st.subheader("📈 Today's Calorie & Macro Tracker")
+    """Calorie tracker tool (page body)."""
+    section_header("Calorie tracker", "What you've eaten today and what remains")
     goal_cal = st.session_state.get("calorie_goal", 2000)
     st.number_input(
         "Daily Calorie Goal (kcal)",
@@ -645,8 +668,8 @@ def _tab4_calorie_tracker() -> None:
     st.session_state.setdefault("pending_analysis", None)
 
     meal_desc = st.text_area("Describe your meal or food", placeholder="e.g. 2 eggs and 2 cups of milk", height=80)
-    
-    if st.button("🔍 Analyze Meal", use_container_width=True):
+
+    if st.button("Analyze meal", use_container_width=True):
         if not meal_desc.strip():
             st.warning("Please enter a meal description.")
         else:
@@ -660,24 +683,24 @@ def _tab4_calorie_tracker() -> None:
 
     if st.session_state.get("pending_analysis"):
         res = st.session_state["pending_analysis"]
-        st.markdown("### Meal Analysis")
-        st.markdown(f"🍽️ **{res.get('food', meal_desc)}**")
-        
-        # Display metrics nicely
-        c1, c2, c3, c4, c5 = st.columns(5)
-        c1.metric("Calories", f"{res.get('calories', 0)} kcal")
-        c2.metric("Protein", f"{res.get('protein', 0)} g")
-        c3.metric("Carbs", f"{res.get('carbs', 0)} g")
-        c4.metric("Fat", f"{res.get('fat', 0)} g")
-        c5.metric("Fiber", f"{res.get('fiber', 0)} g")
-        
-        st.caption(f"*Estimated based on: {res.get('serving_assumption', 'Typical serving sizes')}*")
+        section_header("Meal analysis")
+        st.markdown(f"**{res.get('food', meal_desc)}**")
+
+        stat_row([
+            {"label": "Calories", "value": f"{res.get('calories', 0)}"},
+            {"label": "Protein", "value": f"{res.get('protein', 0)} g"},
+            {"label": "Carbs", "value": f"{res.get('carbs', 0)} g"},
+            {"label": "Fat", "value": f"{res.get('fat', 0)} g"},
+            {"label": "Fiber", "value": f"{res.get('fiber', 0)} g"},
+        ])
+
+        st.caption(f"Estimated based on: {res.get('serving_assumption', 'typical serving sizes')}")
         if res.get('notes'):
-            st.caption(f"*{res.get('notes')}*")
-            
+            st.caption(res['notes'])
+
         st.caption("Nutrition values are estimates and can vary by brand, preparation method, and serving size.")
-        
-        if st.button("➕ Add to Today's Log", use_container_width=True):
+
+        if st.button("Add to today's log", type="primary", use_container_width=True, key="tracker_add_btn"):
             st.session_state["tracker_entries"].append({
                 "Meal": res.get("food", meal_desc),
                 "Calories": res.get("calories", 0),
@@ -691,7 +714,7 @@ def _tab4_calorie_tracker() -> None:
             st.success("Meal added to today's log!")
             st.rerun()
 
-    st.markdown("---")
+    section_header("Today's log")
     if st.session_state["tracker_entries"]:
         log_df = pd.DataFrame(st.session_state["tracker_entries"])
         total_cal = log_df["Calories"].sum()
@@ -699,34 +722,32 @@ def _tab4_calorie_tracker() -> None:
         total_carbs = log_df.get("Carbs (g)", pd.Series(dtype=int)).sum()
         total_fat = log_df.get("Fat (g)", pd.Series(dtype=int)).sum()
         total_fiber = log_df.get("Fiber (g)", pd.Series(dtype=int)).sum()
-        
+
         remaining = st.session_state["goal_cal_input"] - total_cal
 
-        show_metrics_row(
-            {
-                "🔥 Calories Consumed": total_cal,
-                "🎯 Calories Remaining": remaining,
-                "💪 Total Protein": f"{total_protein}g",
-            }
-        )
-        
-        # Show secondary macros
-        sc1, sc2, sc3 = st.columns(3)
-        sc1.metric("🍞 Total Carbs", f"{total_carbs}g")
-        sc2.metric("🥑 Total Fat", f"{total_fat}g")
-        sc3.metric("🥦 Total Fiber", f"{total_fiber}g")
+        stat_row([
+            {"label": "Calories", "value": f"{int(total_cal):,}", "hint": f"goal {int(st.session_state['goal_cal_input']):,}"},
+            {"label": "Remaining", "value": f"{int(remaining):,}"},
+            {"label": "Protein", "value": f"{int(total_protein)} g"},
+            {"label": "Carbs", "value": f"{int(total_carbs)} g"},
+            {"label": "Fat", "value": f"{int(total_fat)} g"},
+            {"label": "Fiber", "value": f"{int(total_fiber)} g"},
+        ])
 
         progress = min(total_cal / max(1, st.session_state["goal_cal_input"]), 1.0)
-        st.progress(progress, text=f"{int(progress * 100)}% of daily goal reached")
+        st.progress(progress, text=f"{int(progress * 100)}% of daily goal")
         st.dataframe(log_df, use_container_width=True)
 
-        if st.button("🗑️ Clear Log"):
+        if st.button("Clear log", key="tracker_clear_btn"):
             st.session_state["tracker_entries"] = []
             st.session_state["pending_analysis"] = None
             save_current_user_state()
             st.rerun()
     else:
-        st.info("No entries yet. Analyze and log your meals above.")
+        empty_state(
+            "Nothing logged yet",
+            "Analyze a meal above and add it to build today's log.",
+        )
 
 
 def render_diet_page() -> None:

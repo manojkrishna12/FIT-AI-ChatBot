@@ -42,7 +42,9 @@ from m import (
     initialize_gemini,
     load_exercise_data,
     page_header,
-    show_metrics_row,
+    section_header,
+    section_tabs,
+    stat_row,
 )
 from storage import append_session_history, save_current_user_state
 from auth import profile_prefill
@@ -469,15 +471,15 @@ def render_gym_trainer_page() -> None:
             "The workout planner and exercise database still work."
         )
 
-    tab1, tab2, tab3, tab4, tab5 = st.tabs(
-        ["📸 Image Analysis", "🎬 Video & Rep Counter",
-         "📋 Workout Plan Generator", "🗂️ Exercise Database",
-         "🔴 Live Webcam"]
+    mode = section_tabs(
+        ["Image Analysis", "Video & Reps", "Workout Plan", "Exercise Database", "Live Webcam"],
+        key="trainer_mode",
+        default="Image Analysis",
     )
 
-    # ── TAB 1 : Image Analysis ────────────────────────────────────
-    with tab1:
-        st.subheader("Single-Frame Pose Analysis")
+    # ── MODE 1 : Image Analysis ───────────────────────────────────
+    if mode == "Image Analysis":
+        section_header("Single-frame pose analysis")
         col_l, col_r = st.columns([1, 2])
 
         with col_l:
@@ -491,7 +493,7 @@ def render_gym_trainer_page() -> None:
             img_arr   = np.array(pil_img)
             img_bgr   = cv2.cvtColor(img_arr, cv2.COLOR_RGB2BGR)
 
-            with st.spinner("🔍 Detecting pose …"):
+            with st.spinner("Detecting pose…"):
                 res = process_image(img_bgr, exercise)
 
             c1, c2 = st.columns(2)
@@ -505,24 +507,23 @@ def render_gym_trainer_page() -> None:
 
             if res["pose_detected"]:
                 st.success(
-                    f"✅ Pose detected!  |  Joint Angle: **{res['angle']}°**  "
-                    f"|  Stage: **{res['rep_stage']}**"
+                    f"Pose detected — joint angle **{res['angle']}°**, stage **{res['rep_stage']}**"
                 )
-                st.subheader("📌 Form Feedback")
+                section_header("Form feedback")
                 for line in res["feedback"]:
                     st.write(line)
 
-                with st.expander("🤖 Get Detailed AI Coach Analysis"):
-                    with st.spinner("Asking AI coach …"):
+                with st.expander("Get detailed AI coach analysis"):
+                    with st.spinner("Asking AI coach…"):
                         analysis = ai_form_analysis(exercise, res["angle"], model)
                     st.info(analysis)
             else:
                 for line in res["feedback"]:
                     st.warning(line)
 
-    # ── TAB 2 : Video Analysis ────────────────────────────────────
-    with tab2:
-        st.subheader("Video Rep Counter & Angle Tracking")
+    # ── MODE 2 : Video Analysis ───────────────────────────────────
+    elif mode == "Video & Reps":
+        section_header("Video rep counter & angle tracking")
         col_l, _ = st.columns([1, 1])
         with col_l:
             exercise_v = st.selectbox("Select Exercise", list(EXERCISE_CONFIG.keys()), key="vid_ex")
@@ -540,11 +541,11 @@ def render_gym_trainer_page() -> None:
             os.unlink(tfile.name)
 
             # Metrics row
-            show_metrics_row({
-                "🔁 Total Reps"      : vres["rep_count"],
-                "📐 Avg Joint Angle" : f"{vres['avg_angle']}°",
-                "🎞️ Frames Analyzed" : vres["total_frames"],
-            })
+            stat_row([
+                {"label": "Total reps", "value": str(vres["rep_count"])},
+                {"label": "Avg joint angle", "value": f"{vres['avg_angle']}°"},
+                {"label": "Frames analyzed", "value": str(vres["total_frames"])},
+            ])
 
             # Angle chart
             if vres["angles"]:
@@ -557,7 +558,7 @@ def render_gym_trainer_page() -> None:
 
             # Sample frames
             if vres["sample_frames"]:
-                st.subheader("📷 Sample Frames")
+                section_header("Sample frames")
                 cols = st.columns(len(vres["sample_frames"]))
                 labels = ["Start", "Middle", "End"]
                 for col, frame, lbl in zip(cols, vres["sample_frames"], labels):
@@ -569,9 +570,9 @@ def render_gym_trainer_page() -> None:
                     "and the selected exercise matches the video."
                 )
 
-    # ── TAB 3 : Workout Plan ─────────────────────────────────────
-    with tab3:
-        st.subheader("🎯 AI Personalised Workout Plan Generator")
+    # ── MODE 3 : Workout Plan ─────────────────────────────────────
+    elif mode == "Workout Plan":
+        section_header("Workout plan generator")
 
         if st.session_state.get("workout_plan_history"):
             with st.expander("Saved Workout Plans"):
@@ -602,7 +603,7 @@ def render_gym_trainer_page() -> None:
                 days    = st.slider("Training Days per Week", 1, 7, 4)
                 health  = st.text_input("Health notes / injuries (optional)", "None")
 
-            submitted = st.form_submit_button("🚀 Generate My Workout Plan", use_container_width=True)
+            submitted = st.form_submit_button("Generate My Workout Plan", use_container_width=True)
 
         if submitted:
             user_data = {
@@ -611,9 +612,9 @@ def render_gym_trainer_page() -> None:
                 "equipment": ", ".join(equip) if equip else "None",
                 "days": days, "health": health,
             }
-            with st.spinner("🤖 Creating your personalised plan …"):
+            with st.spinner("Creating your personalised plan…"):
                 plan = ai_workout_plan(user_data, model)
-            st.success("✅ Your workout plan is ready!")
+            st.success("Your workout plan is ready.")
             st.markdown(plan)
             append_session_history(
                 "workout_plan_history",
@@ -625,17 +626,17 @@ def render_gym_trainer_page() -> None:
             )
             save_current_user_state()
             st.download_button(
-                "📥 Download Plan",
+                "Download plan",
                 plan, file_name=f"{name}_workout_plan.txt", mime="text/plain"
             )
 
-    # ── TAB 4 : Exercise Database ─────────────────────────────────
-    with tab4:
-        st.subheader("🗂️ Kaggle Exercise Database")
+    # ── MODE 4 : Exercise Database ────────────────────────────────
+    elif mode == "Exercise Database":
+        section_header("Exercise database")
         if not exercise_df.empty:
             col_f1, col_f2 = st.columns(2)
             with col_f1:
-                search = st.text_input("🔍 Search exercise", placeholder="e.g. chest, deadlift")
+                search = st.text_input("Search exercise", placeholder="e.g. chest, deadlift")
             with col_f2:
                 body_parts = ["All"]
                 bp_col = next((c for c in exercise_df.columns if "body" in c.lower()), None)
@@ -658,9 +659,9 @@ def render_gym_trainer_page() -> None:
             st.info("Place exercises.csv in the Data/ folder to enable the full exercise database.")
 
 
-    # ── TAB 5 : Live Webcam ───────────────────────────────────────
-    with tab5:
-        st.subheader("🔴 Live Real-Time WebRTC Tracking")
+    # ── MODE 5 : Live Webcam ──────────────────────────────────────
+    elif mode == "Live Webcam":
+        section_header("Live webcam tracking")
         st.markdown(
             "Start your camera and perform the exercise. "
             "Reps and form feedback will be shown live on your screen!"

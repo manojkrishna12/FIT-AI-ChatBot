@@ -12,6 +12,7 @@ import streamlit as st
 from constants import CHAT_CONTEXT_TURNS, MOTIVATIONAL_QUOTES
 from m import page_header, get_gemini_response
 from storage import save_current_user_state
+from ui import section_header
 
 
 _POS_WORDS = {
@@ -144,8 +145,8 @@ def _ensure_welcome_message() -> None:
     if "chat_history" not in st.session_state:
         from datetime import datetime
         welcome = (
-            f"Hey there! 👋 I'm **FitBot** — your personal AI gym buddy. "
-            f"I'm here to help with workouts, nutrition, motivation, and consistency.\n\n"
+            f"Hey there! I'm **FitBot** — your fitness companion for training, "
+            f"nutrition, and staying consistent.\n\n"
             f"Today is **{datetime.now().strftime('%A, %B %d')}**. "
             f"How are you feeling about your fitness journey today?"
         )
@@ -161,10 +162,17 @@ def render_gym_buddy_page() -> None:
 
     _ensure_welcome_message()
 
-    with st.sidebar:
-        st.markdown("### 🎯 Quick Actions")
+    chat_col, side_col = st.columns([2.6, 1], gap="large")
 
-        if st.button("💪 Today's Challenge", use_container_width=True):
+    with chat_col:
+        section_header("Chat with FitBot")
+        for msg in st.session_state["chat_history"]:
+            with st.chat_message(msg["role"]):
+                st.markdown(msg["content"])
+
+    with side_col:
+        section_header("Today's challenge")
+        if st.button("Get my challenge", use_container_width=True, key="buddy_challenge"):
             with st.spinner("Getting your challenge..."):
                 challenge = ai_daily_challenge()
             st.session_state["chat_history"].append(
@@ -175,8 +183,7 @@ def render_gym_buddy_page() -> None:
             )
             st.rerun()
 
-        st.markdown("---")
-        st.markdown("### 😊 Mood Check")
+        section_header("Mood check")
         mood_options = [
             "Pumped Up",
             "Tired & Low Energy",
@@ -187,8 +194,8 @@ def render_gym_buddy_page() -> None:
             "Hit a Plateau",
             "Just Crushed a PR!",
         ]
-        selected_mood = st.selectbox("How are you feeling?", mood_options, label_visibility="collapsed")
-        if st.button("🚀 Get Mood Boost", use_container_width=True):
+        selected_mood = st.selectbox("How are you feeling?", mood_options, label_visibility="collapsed", key="buddy_mood")
+        if st.button("Get mood boost", use_container_width=True, key="buddy_boost"):
             with st.spinner("FitBot is thinking..."):
                 boost = ai_mood_boost(selected_mood)
             st.session_state["chat_history"].append(
@@ -199,8 +206,7 @@ def render_gym_buddy_page() -> None:
             )
             st.rerun()
 
-        st.markdown("---")
-        st.markdown("### 💡 Quick Tips")
+        section_header("Quick tips")
         tip_topics = [
             "Recovery",
             "Sleep & Fitness",
@@ -210,8 +216,8 @@ def render_gym_buddy_page() -> None:
             "Motivation hacks",
             "Form & injury prevention",
         ]
-        selected_tip = st.selectbox("Choose a topic", tip_topics, label_visibility="collapsed")
-        if st.button("💡 Get Tip", use_container_width=True):
+        selected_tip = st.selectbox("Choose a topic", tip_topics, label_visibility="collapsed", key="buddy_tip")
+        if st.button("Get tip", use_container_width=True, key="buddy_get_tip"):
             with st.spinner("Fetching tip..."):
                 tip = ai_weekly_tip(selected_tip)
             st.session_state["chat_history"].append(
@@ -222,17 +228,15 @@ def render_gym_buddy_page() -> None:
             )
             st.rerun()
 
-        st.markdown("---")
-        st.markdown("### ✅ Workout Check-In")
+        section_header("Workout check-in")
         if not st.session_state.get("checkin_done_today", False):
-            workout_done = st.checkbox("I completed a workout today!")
+            workout_done = st.checkbox("I completed a workout today!", key="buddy_checkin")
             if workout_done:
                 today = date.today()
                 if st.session_state.get("last_checkin_date") != today:
                     st.session_state["streak_days"] = st.session_state.get("streak_days", 0) + 1
                     st.session_state["last_checkin_date"] = today
                     st.session_state["checkin_done_today"] = True
-                    st.balloons()
                     congrats = (
                         f"Yes! You checked in today — that's **{st.session_state['streak_days']} day(s)** "
                         f"on your streak. {random.choice(MOTIVATIONAL_QUOTES)}"
@@ -242,51 +246,42 @@ def render_gym_buddy_page() -> None:
                     st.rerun()
         else:
             st.success("Workout logged today.")
+        st.caption(f"Current streak: **{st.session_state.get('streak_days', 0)} days**")
 
-        st.metric("🔥 Current Streak", f"{st.session_state.get('streak_days', 0)} days")
-
-        st.markdown("---")
-        st.markdown("### 📊 Session Stats")
+        section_header("Session stats")
         user_messages = [msg for msg in st.session_state["chat_history"] if msg["role"] == "user"]
         if user_messages:
             sentiments = [analyze_sentiment(msg["content"]) for msg in user_messages]
             positivity = int(sentiments.count("positive") / len(sentiments) * 100)
             latest_sentiment = sentiments[-1]
-            st.metric("Messages", len(user_messages))
-            st.metric("Positivity", f"{positivity}%")
+            st.caption(f"Messages: **{len(user_messages)}** · Positivity: **{positivity}%**")
             st.caption(
                 f"Latest vibe: {sentiment_emoji(latest_sentiment)} {latest_sentiment.capitalize()}"
             )
         else:
             st.caption("Send a message to see your stats.")
 
-        st.markdown("---")
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+        if st.button("Clear chat", use_container_width=True, key="buddy_clear"):
             del st.session_state["chat_history"]
             st.rerun()
 
-    st.subheader("💬 Chat with FitBot")
-    for msg in st.session_state["chat_history"]:
-        avatar = "🤖" if msg["role"] == "assistant" else "👤"
-        with st.chat_message(msg["role"], avatar=avatar):
-            st.markdown(msg["content"])
+    with chat_col:
+        prompt = st.chat_input("Ask anything — workout tips, diet advice, motivation...")
+        if prompt:
+            st.session_state["chat_history"].append({"role": "user", "content": prompt})
 
-    prompt = st.chat_input("Ask anything — workout tips, diet advice, motivation...")
-    if prompt:
-        st.session_state["chat_history"].append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
-        with st.chat_message("user", avatar="👤"):
-            st.markdown(prompt)
+            sentiment = analyze_sentiment(prompt)
+            with st.chat_message("assistant"):
+                with st.spinner("FitBot is typing..."):
+                    reply = chat_with_buddy(prompt, st.session_state["chat_history"][:-1])
+                st.markdown(reply)
 
-        sentiment = analyze_sentiment(prompt)
-        with st.chat_message("assistant", avatar="🤖"):
-            with st.spinner("FitBot is typing..."):
-                reply = chat_with_buddy(prompt, st.session_state["chat_history"][:-1])
-            st.markdown(reply)
+            st.session_state["chat_history"].append({"role": "assistant", "content": reply})
 
-        st.session_state["chat_history"].append({"role": "assistant", "content": reply})
+            if sentiment == "negative" and random.random() < 0.6:
+                st.toast(random.choice(MOTIVATIONAL_QUOTES), icon="💪")
 
-        if sentiment == "negative" and random.random() < 0.6:
-            st.toast(random.choice(MOTIVATIONAL_QUOTES), icon="💪")
-
-        st.rerun()
+            st.rerun()

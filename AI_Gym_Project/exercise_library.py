@@ -17,7 +17,7 @@ from constants import (
     REPDB_IMAGES_BASE_URL,
     REPDB_ATTRIBUTION,
 )
-from m import page_header
+from m import page_header, section_header
 from storage import get_exercise_images_bucket
 
 _PAGE_SIZE = 24
@@ -60,9 +60,9 @@ def _image_html(filename: str | None) -> str:
             url = REPDB_IMAGES_BASE_URL + filename
             return (
                 f'<img src="{url}" alt="" loading="lazy" '
-                f'onerror="this.style.display=\'none\'" style="background:#101828"/>'
+                f'onerror="this.style.display=\'none\'" style="background:#f6f7f9"/>'
             )
-    return '<div class="media-fallback">🏋️</div>'
+    return '<div class="media-fallback">No image</div>'
 
 
 def _load_catalog() -> list[dict]:
@@ -179,13 +179,13 @@ def _render_detail(doc: dict) -> None:
 
     steps = doc.get("instructions_en") or []
     if steps:
-        st.markdown("### Instructions")
+        section_header("Instructions")
         for i, step in enumerate(steps, 1):
             st.markdown(f"{i}. {step}")
 
     tips = doc.get("tips_en") or []
     if tips:
-        st.markdown("### Tips")
+        section_header("Tips")
         for tip in tips:
             st.markdown(f"- {tip}")
 
@@ -209,12 +209,12 @@ def render_exercise_library_page() -> None:
         )
         return
 
-    st.success(f"{len(docs)} curated exercises · {REPDB_ATTRIBUTION}")
+    st.caption(f"{len(docs)} curated exercises · {REPDB_ATTRIBUTION}")
     facets = _facets(docs)
 
     c1, c2 = st.columns([2, 1])
     with c1:
-        query = st.text_input("🔍 Search", placeholder="e.g. squat, curl, hip …", key="exlib_search")
+        query = st.text_input("Search", placeholder="Search exercises — e.g. squat, curl, hip …", key="exlib_search")
     with c2:
         sort_by = st.selectbox(
             "Sort by",
@@ -268,7 +268,7 @@ def render_exercise_library_page() -> None:
             return
         st.session_state.pop("exlib_selected", None)
 
-    st.markdown(f"Showing **{len(filtered)}** exercises")
+    st.caption(f"Showing {len(filtered)} of {len(docs)} exercises")
     if not filtered:
         st.info("No exercises match these filters.")
         return
