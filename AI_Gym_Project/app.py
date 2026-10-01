@@ -1,337 +1,263 @@
 """
-Main Streamlit app entrypoint for the AI Gym project.
-(UI-only redesign v2: premium fitness product UI — all backend logic preserved.)
+Main Streamlit entrypoint for FIT-AI.
+
+Phase 1: professional light UI — a minimal two-level navigation (eight main
+sidebar sections; Training and Nutrition open a segmented sub-navigation in
+the content area) and a clean home dashboard. All backend logic (Gemini,
+MongoDB, auth, trainer, diet) is untouched; pages are dispatched from the
+labels below via their canonical targets.
 """
 
 from __future__ import annotations
 
-import os
+from datetime import date, datetime
 
 import streamlit as st
 from dotenv import load_dotenv
-import os
+
 load_dotenv()
 
-from m import inject_custom_css, render_top_header
-from storage import ensure_user_state_loaded, get_storage_status, normalize_user_id
-
+from m import inject_custom_css
+from storage import ensure_user_state_loaded
+from ui import page_header, section_header, section_tabs, stat_row
 
 st.set_page_config(
-    page_title="AI Gym & Fitness Assistant",
-    page_icon="💪",
+    page_title="FIT-AI",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-# ── Navigation constants & routes (target information architecture) ──
-# Labels are the exact sidebar entries; ROUTES maps each label to a dispatch
-# target consumed by main(). Keep all three in sync.
-PAGE_HOME = "🏠 Home"
+# ── Navigation model ──────────────────────────────────────────────────────────
+# The sidebar shows eight main sections. Training and Nutrition open a
+# segmented control with their feature pages; every other section is a direct
+# page (Coach IS Gym Buddy — no submenu). ROUTES maps every visible label to
+# its canonical dispatch target; internal target strings are stable.
 
-PAGE_TRAINER = "🏋️ AI Gym Trainer"
-PAGE_EXERCISE_LIBRARY = "📚 Exercise Library"
-PAGE_ROUTINES = "🗓️ Routines"
+PAGE_HOME = "Home"
+PAGE_TRAINING = "Training"
+PAGE_NUTRITION = "Nutrition"
+PAGE_PROGRESS = "Progress"
+PAGE_COACH = "Coach"
+PAGE_PROFILE = "Profile"
+PAGE_SETTINGS = "Settings"
+PAGE_ABOUT = "About"
 
-PAGE_DIET = "🥗 Diet Coach"
-PAGE_MEAL_ANALYSER = "🍽️ Meal Analyser"
-PAGE_GROCERY = "🛒 Grocery List"
-PAGE_CALORIE_TRACKER = "📈 Calorie Tracker"
+PAGE_WORKOUTS = "Workouts"  # displayed name; canonical route stays "routines"
+PAGE_EXERCISE_LIBRARY = "Exercise Library"
+PAGE_TRAINER = "AI Gym Trainer"
 
-PAGE_BUDDY = "🤝 Gym Buddy"
+PAGE_DIET = "Diet Coach"
+PAGE_MEAL_ANALYSER = "Meal Analyser"
+PAGE_CALORIE_TRACKER = "Calorie Tracker"
+PAGE_GROCERY = "Grocery List"
 
-PAGE_PROGRESS = "📊 Progress"
-PAGE_PROFILE = "👤 Profile"
-PAGE_SETTINGS = "⚙️ Settings"
-PAGE_ABOUT = "ℹ️ About"
-
-# Ordered sidebar structure: (group label, [page labels]); None = no header.
-# Grouping is rendered as flat nav for now (single-radio, lowest-risk);
-# visual grouping can layer on top without changing ROUTES.
-NAV_GROUPS: list[tuple[str | None, list[str]]] = [
-    (None, [PAGE_HOME]),
-    ("Training", [PAGE_TRAINER, PAGE_EXERCISE_LIBRARY, PAGE_ROUTINES]),
-    ("Nutrition", [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_GROCERY, PAGE_CALORIE_TRACKER]),
-    ("Coach", [PAGE_BUDDY]),
-    (None, [PAGE_PROGRESS, PAGE_PROFILE, PAGE_SETTINGS, PAGE_ABOUT]),
+MAIN_NAV: list[str] = [
+    PAGE_HOME,
+    PAGE_TRAINING,
+    PAGE_NUTRITION,
+    PAGE_PROGRESS,
+    PAGE_COACH,
+    PAGE_PROFILE,
+    PAGE_SETTINGS,
+    PAGE_ABOUT,
 ]
-PAGE_OPTIONS: list[str] = [label for _, labels in NAV_GROUPS for label in labels]
+
+# Feature pages per section, rendered with the shared section_tabs component.
+SECTION_PAGES: dict[str, list[str]] = {
+    PAGE_TRAINING: [PAGE_WORKOUTS, PAGE_EXERCISE_LIBRARY, PAGE_TRAINER],
+    PAGE_NUTRITION: [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_CALORIE_TRACKER, PAGE_GROCERY],
+}
 
 ROUTES: dict[str, str] = {
     PAGE_HOME: "home",
-    PAGE_TRAINER: "trainer",
-    PAGE_EXERCISE_LIBRARY: "exercise_library",
-    PAGE_ROUTINES: "routines",
-    PAGE_DIET: "diet",
-    PAGE_MEAL_ANALYSER: "meal_analyser",
-    PAGE_GROCERY: "grocery_list",
-    PAGE_CALORIE_TRACKER: "calorie_tracker",
-    PAGE_BUDDY: "buddy",
+    PAGE_TRAINING: "training",
+    PAGE_NUTRITION: "nutrition",
     PAGE_PROGRESS: "progress",
+    PAGE_COACH: "buddy",  # direct page — selecting Coach opens Gym Buddy
     PAGE_PROFILE: "profile",
     PAGE_SETTINGS: "settings",
     PAGE_ABOUT: "about",
+    PAGE_WORKOUTS: "routines",
+    PAGE_EXERCISE_LIBRARY: "exercise_library",
+    PAGE_TRAINER: "trainer",
+    PAGE_DIET: "diet",
+    PAGE_MEAL_ANALYSER: "meal_analyser",
+    PAGE_CALORIE_TRACKER: "calorie_tracker",
+    PAGE_GROCERY: "grocery_list",
 }
-
-_ASSET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
-
-BRAND_HTML = """
-<div class="brand">
-  <svg width="42" height="42" viewBox="0 0 44 44" fill="none">
-    <circle cx="18" cy="17" r="11" fill="#ff6a3d" opacity="0.9"/>
-    <circle cx="27" cy="16" r="11" fill="#9d5cff" opacity="0.9"/>
-    <circle cx="22" cy="27" r="11" fill="#ff2e63" opacity="0.9"/>
-  </svg>
-  <div>
-    <div class="brand-name">FitAI Hub</div>
-    <div class="brand-sub">Your AI Fitness Assistant</div>
-  </div>
-</div>
-"""
-
-MOTIVATIONAL_HTML = """
-<div class="mcard">
-  <div class="mcard-text"><span class="mcard-accent">Discipline today,</span> strength tomorrow.</div>
-  <div class="mcard-icon">💪</div>
-</div>
-"""
-
-HERO_TEXT_HTML = """
-<div class="hero-badge">⚡ AI-POWERED FITNESS</div>
-<div class="hero-title">Train Smarter.<br/>Eat Better.<br/><span class="hero-title-accent">Live Stronger.</span></div>
-<div class="hero-sub">Your personal AI assistant for workouts, nutrition and everyday fitness guidance.</div>
-"""
-
-EXPLORE_HEADING_HTML = """
-<div id="explore" class="section-head"><div class="section-icon">✦</div><div class="section-title">Explore</div></div>
-<div class="section-sub">Everything you need for your fitness journey.</div>
-"""
-
-TOOLS_HEADING_HTML = """
-<div class="section-head"><div class="section-icon green">🧰</div><div class="section-title">Fitness Tools</div></div>
-<div class="section-sub">Quick nutrition and tracking tools.</div>
-"""
-
-QUICK_START_HTML = """
-<div class="qs-wrap">
-  <div class="section-head"><div class="section-icon">🚀</div><div class="qs-title">Quick Start</div></div>
-  <div class="qs-sub">Your path to a stronger, healthier you.</div>
-  <div class="qs-steps">
-    <div class="qs-step"><div class="qs-num">1</div><div class="qs-name">Choose a module</div><div class="qs-desc">Training, Nutrition or Coach</div></div>
-    <div class="qs-arrow">▸</div>
-    <div class="qs-step"><div class="qs-num">2</div><div class="qs-name">Follow the instructions</div><div class="qs-desc">Get AI-powered assistance</div></div>
-    <div class="qs-arrow">▸</div>
-    <div class="qs-step"><div class="qs-num">3</div><div class="qs-name">Stay consistent</div><div class="qs-desc">Small steps, big results</div></div>
-    <div class="qs-arrow">▸</div>
-    <div class="qs-step"><div class="qs-num">4</div><div class="qs-name">Achieve your goals</div><div class="qs-desc">You've got this!</div></div>
-  </div>
-</div>
-"""
-
-HOME_FOOTER_HTML = '<div class="home-footer">BUILT WITH STREAMLIT · MEDIAPIPE · GEMINI AI</div>'
-
-
-@st.cache_data(show_spinner=False)
-def _media_data_uri(image_name: str) -> str | None:
-    """Return a compressed base64 data URI for a local asset (cached)."""
-    path = os.path.join(_ASSET_DIR, image_name)
-    if not (os.path.exists(path) and os.path.getsize(path) > 5000):
-        return None
-    try:
-        from PIL import Image
-        import io
-        import base64
-
-        im = Image.open(path)
-        im.thumbnail((1200, 1200))
-        if im.mode != "RGB":
-            im = im.convert("RGB")
-        buf = io.BytesIO()
-        im.save(buf, format="JPEG", quality=72, optimize=True)
-        return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
-    except Exception:
-        return None
-
-
-def _media_html(image_name: str, fallback_emoji: str) -> str:
-    """HTML <img> for a local asset, with a gradient fallback if missing."""
-    uri = _media_data_uri(image_name)
-    if uri:
-        return f'<img src="{uri}" alt="" loading="lazy"/>'
-    return f'<div class="media-fallback">{fallback_emoji}</div>'
 
 
 def _navigate(page: str) -> None:
-    """Request a page switch; consumed before the nav radio is instantiated."""
+    """Request a page switch; consumed by the sidebar before widgets render."""
     st.session_state["_navigate_to"] = page
     st.rerun()
 
 
-def _scroll_to(anchor: str) -> None:
-    st.session_state["_scroll_to"] = anchor
-    st.rerun()
+def _parent_section(label: str) -> str | None:
+    """Return the main section that owns a subsection label, if any."""
+    for section, pages in SECTION_PAGES.items():
+        if label in pages:
+            return section
+    return None
+
+
+# ── Home dashboard ────────────────────────────────────────────────────────────
+
+def _greeting_name() -> str:
+    """Display name for the greeting: account name, else the active user id."""
+    try:
+        from auth import get_account_display_name, is_authenticated
+
+        if is_authenticated():
+            name = (get_account_display_name() or "").strip()
+            if name:
+                return name
+    except Exception:
+        pass
+    user_id = (st.session_state.get("active_user_id") or "").strip()
+    return "" if user_id in ("", "guest") else user_id
+
+
+def _workouts_this_week() -> int | None:
+    """Count logged Progress sessions in the last 7 days (real data only)."""
+    try:
+        from progress import list_sessions
+
+        user_id = st.session_state.get("active_user_id") or "guest"
+        sessions = list_sessions(user_id)
+    except Exception:
+        return None
+    today = date.today()
+    count = 0
+    for session in sessions:
+        raw = str(session.get("date") or "")[:10]
+        try:
+            day = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        delta = (today - day).days
+        if 0 <= delta <= 6:
+            count += 1
+    return count
+
+
+def _calories_logged() -> float | None:
+    """Sum the calorie tracker log for the active user (real data only)."""
+    entries = st.session_state.get("tracker_entries") or []
+    total = 0.0
+    for entry in entries:
+        try:
+            total += float(entry.get("Calories") or 0)
+        except (TypeError, ValueError):
+            continue
+    return total
 
 
 def render_home() -> None:
-    """Render the landing page (hero, explore cards, tools, quick start)."""
-    # ── Hero ──────────────────────────────────────────────────────────
-    # Built via string concatenation (no leading indentation) so the
-    # injected multi-line HTML never trips markdown's code-block rule.
-    hero_html = (
-        '<div class="hero-card"><div class="hero-grid"><div>'
-        + HERO_TEXT_HTML
-        + '</div><div class="hero-media">'
-        + _media_html("hero.jpg", "🏋️")
-        + '</div></div></div>'
+    """Clean home dashboard: greeting, primary actions, real stats, quick access."""
+    hour = datetime.now().hour
+    part = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
+    name = _greeting_name()
+    page_header(f"Good {part}, {name}" if name else f"Good {part}")
+
+    st.markdown('<div style="height:0.45rem"></div>', unsafe_allow_html=True)
+
+    action_col, meal_col, _ = st.columns([1, 1, 2.4], gap="small")
+    with action_col:
+        if st.button("Start Workout", type="primary", use_container_width=True, key="home_start_workout"):
+            _navigate(PAGE_WORKOUTS)
+    with meal_col:
+        if st.button("Log Meal", use_container_width=True, key="home_log_meal"):
+            _navigate(PAGE_MEAL_ANALYSER)
+
+    week = _workouts_this_week()
+    calories = _calories_logged()
+    goal = st.session_state.get("calorie_goal", 2000)
+    streak = st.session_state.get("streak_days", 0)
+    stat_row(
+        [
+            {"label": "Workouts this week", "value": str(week) if week is not None else "—"},
+            {
+                "label": "Calories logged",
+                "value": f"{int(calories):,}" if calories is not None else "—",
+                "hint": f"Goal {int(goal):,} kcal",
+            },
+            {"label": "Streak", "value": str(int(streak or 0)), "hint": "days"},
+        ]
     )
-    st.markdown(hero_html, unsafe_allow_html=True)
-    b1, b2, _spacer = st.columns([1, 1, 2.6], gap="small")
-    with b1:
-        if st.button("Get Started →", key="hero_start", type="primary", use_container_width=True):
-            _navigate(PAGE_TRAINER)
-    with b2:
-        if st.button("Explore Features", key="hero_explore", use_container_width=True):
-            _scroll_to("explore")
 
-    # ── Explore: three primary feature cards ─────────────────────────
-    st.markdown(EXPLORE_HEADING_HTML, unsafe_allow_html=True)
-    cards = [
-        ("AI Gym Trainer", "trainer.jpg", "🏋️",
-         "Real-time exercise guidance, pose analysis and rep counting.",
-         "Open Trainer →", "open_trainer", PAGE_TRAINER),
-        ("Diet Coach", "diet.jpg", "🥗",
-         "Personalized diet plans, meal analysis, grocery planning and calorie tracking.",
-         "Open Diet Coach →", "open_diet", PAGE_DIET),
-        ("Gym Buddy", "buddy.jpg", "🤖",
-         "Your AI fitness companion for motivation, workout advice and fitness guidance.",
-         "Open Gym Buddy →", "open_buddy", PAGE_BUDDY),
+    section_header("Quick access")
+    quick_items = [
+        (PAGE_TRAINER, "AI Gym Trainer"),
+        (PAGE_EXERCISE_LIBRARY, "Exercise Library"),
+        (PAGE_WORKOUTS, "Workouts"),
+        (PAGE_DIET, "Diet Coach"),
+        (PAGE_CALORIE_TRACKER, "Calorie Tracker"),
+        (PAGE_COACH, "Gym Buddy"),
     ]
-    cols = st.columns(3, gap="medium")
-    for col, (title, img, emoji, desc, label, key, target) in zip(cols, cards):
-        with col:
-            st.markdown(
-                f"""
-                <div class="fcard">
-                  <div class="fcard-media">{_media_html(img, emoji)}</div>
-                  <div class="fcard-body">
-                    <div class="fcard-title">{title}</div>
-                    <div class="fcard-desc">{desc}</div>
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button(label, key=key, use_container_width=True):
-                _navigate(target)
+    for start in (0, 3):
+        cols = st.columns(3, gap="small")
+        for col, (page, label) in zip(cols, quick_items[start : start + 3]):
+            with col:
+                if st.button(label, key=f"home_qa_{page}", use_container_width=True):
+                    _navigate(page)
 
-    # ── Fitness Tools: existing Diet Coach tools (small cards) ───────
-    st.markdown(TOOLS_HEADING_HTML, unsafe_allow_html=True)
-    tools = [
-        ("🥗", "Diet Coach", "Personalized 7-day meal plans", "open_nutrition", PAGE_DIET),
-        ("🍽️", "Meal Analyser", "Instant nutritional breakdown", "open_analyser", PAGE_MEAL_ANALYSER),
-        ("📈", "Calorie Tracker", "Log meals, track macros", "open_calories", PAGE_CALORIE_TRACKER),
-        ("🛒", "Grocery List", "Weekly shopping lists", "open_grocery", PAGE_GROCERY),
-    ]
-    tcols = st.columns(4, gap="medium")
-    for col, (icon, name, desc, key, target_page) in zip(tcols, tools):
-        with col:
-            st.markdown(
-                f"""
-                <div class="tool-card">
-                  <div class="tool-icon">{icon}</div>
-                  <div class="tool-name">{name}</div>
-                  <div class="tool-desc">{desc}</div>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            if st.button("Open →", key=key, use_container_width=True):
-                _navigate(target_page)
 
-    # ── Quick Start ──────────────────────────────────────────────────
-    st.markdown(QUICK_START_HTML, unsafe_allow_html=True)
-    st.markdown(HOME_FOOTER_HTML, unsafe_allow_html=True)
-
-    # Honor a pending "scroll to explore" request.
-    if st.session_state.pop("_scroll_to", None) == "explore":
-        st.components.v1.html(
-            "<script>parent.document.getElementById('explore')?.scrollIntoView({behavior:'smooth'});</script>",
-            height=0,
-        )
-
+# ── Sidebar ───────────────────────────────────────────────────────────────────
 
 def build_sidebar() -> str:
-    """Render the app navigation sidebar and return the selected page.
+    """Render the minimal sidebar and return the selected main section.
 
-    Functional logic is fully preserved: the per-user ID handling and the
-    Gemini/MongoDB availability checks still run here; only their technical
-    status messages are no longer shown in the UI (User ID lives in Settings).
+    Cross-page links request a destination via `_navigate`; subsection labels
+    resolve to their parent section plus the matching sub-navigation state.
+    Per-user identity lives in auth/Profile (and is displayed in Settings),
+    so the navigation carries no user ID or status content.
     """
     with st.sidebar:
-        st.markdown(BRAND_HTML, unsafe_allow_html=True)
+        st.markdown('<div class="brand"><span class="brand-name">FIT-AI</span></div>', unsafe_allow_html=True)
 
-        st.markdown('<div class="nav-label">Main</div>', unsafe_allow_html=True)
-        # Apply any pending navigation request before the radio widget renders.
         pending = st.session_state.pop("_navigate_to", None)
-        if pending in PAGE_OPTIONS:
-            st.session_state["nav_page"] = pending
+        if pending:
+            parent = _parent_section(pending)
+            if parent:
+                st.session_state["nav_page"] = parent
+                st.session_state[f"section_tabs_{parent}"] = pending
+            elif pending in MAIN_NAV:
+                st.session_state["nav_page"] = pending
+
+        # A stale selection (e.g. from an older label set) resolves to Home.
+        if st.session_state.get("nav_page") not in MAIN_NAV:
+            st.session_state["nav_page"] = PAGE_HOME
+
         page = st.radio(
             "Navigation",
-            options=PAGE_OPTIONS,
+            options=MAIN_NAV,
             key="nav_page",
             label_visibility="collapsed",
         )
 
-        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
-
-        # ── Settings ───────────────────────────────────────────────────
-        with st.expander("⚙️ Settings", expanded=False):
-            st.markdown('<div class="set-label">User ID</div>', unsafe_allow_html=True)
-            user_input = st.text_input(
-                "User ID",
-                value=st.session_state.get("active_user_id", ""),
-                placeholder="e.g. manoj123",
-                label_visibility="collapsed",
-                help="Each user id gets their own saved chat, diet, and workout history.",
-            )
-            user_id = normalize_user_id(user_input)
-            if st.session_state.get("active_user_id") != user_id:
-                st.session_state["active_user_id"] = user_id
-                st.session_state["_loaded_user_id"] = None
-
-            # Underlying checks are still performed (behavior unchanged),
-            # but their technical status is not displayed in the UI.
-            os.environ.get("GEMINI_API_KEY", "").strip()
-            get_storage_status()
-
-            st.markdown('<div class="set-divider"></div>', unsafe_allow_html=True)
-            st.markdown("**Appearance** — Dark theme")
-            st.markdown("**AI Provider** — Google Gemini")
-            st.markdown("**Storage** — Local session")
-
-        # ── About ──────────────────────────────────────────────────────
-        with st.expander("ℹ️ About", expanded=False):
-            st.markdown("**FitAI Hub** — AI Gym & Fitness Assistant")
-            st.caption("Your personal AI fitness assistant, powered by Streamlit, MediaPipe and Google Gemini.")
-            st.caption("Version 1.0 — stable")
-
-        st.markdown('<div class="sidebar-divider"></div>', unsafe_allow_html=True)
-        st.markdown(MOTIVATIONAL_HTML, unsafe_allow_html=True)
-
     return page
 
 
-def main() -> None:
-    """Run the application."""
-    inject_custom_css()
-    page = build_sidebar()
-    ensure_user_state_loaded()
-    render_top_header()
+# ── Dispatch ──────────────────────────────────────────────────────────────────
 
-    target = ROUTES.get(page, "home")
+def _render_section(section: str) -> None:
+    """Render a section's sub-navigation and dispatch the chosen feature page.
 
-    if target == "home":
-        render_home()
-    elif target == "trainer":
+    Selection persists per section; an unknown/stale selection falls back to
+    the section's first page (Training -> Workouts, Nutrition -> Diet Coach).
+    """
+    pages = SECTION_PAGES[section]
+    state_key = f"section_tabs_{section}"
+    if st.session_state.get(state_key) not in pages:
+        st.session_state[state_key] = pages[0]
+    subsection = section_tabs(pages, key=section, default=pages[0])
+    _dispatch(ROUTES.get(subsection, "home"))
+
+
+def _dispatch(target: str) -> None:
+    """Render the page for a canonical target string."""
+    if target == "trainer":
         from gym_trainer import render_gym_trainer_page
 
         render_gym_trainer_page()
@@ -379,6 +305,23 @@ def main() -> None:
         from about import render_about_page
 
         render_about_page()
+
+
+def main() -> None:
+    """Run the application."""
+    inject_custom_css()
+    page = build_sidebar()
+    ensure_user_state_loaded()
+
+    target = ROUTES.get(page, "home")
+    if target == "home":
+        render_home()
+    elif target == "training":
+        _render_section(PAGE_TRAINING)
+    elif target == "nutrition":
+        _render_section(PAGE_NUTRITION)
+    else:
+        _dispatch(target)
 
 
 if __name__ == "__main__":

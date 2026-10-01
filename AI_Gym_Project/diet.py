@@ -747,10 +747,10 @@ def render_diet_page() -> None:
 
 
 _NUTRITION_PAGE_LABELS = {
-    "diet": "🥗 Diet Coach",
-    "meal_analyser": "🍽️ Meal Analyser",
-    "grocery_list": "🛒 Grocery List",
-    "calorie_tracker": "📈 Calorie Tracker",
+    "diet": "Diet Coach",
+    "meal_analyser": "Meal Analyser",
+    "grocery_list": "Grocery List",
+    "calorie_tracker": "Calorie Tracker",
 }
 
 
