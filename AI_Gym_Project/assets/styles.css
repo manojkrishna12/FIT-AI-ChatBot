@@ -430,6 +430,20 @@ hr {
 .stat-inline-label { font-size: var(--text-xs); color: var(--color-text-2); }
 .stat-inline-value { font-size: var(--text-base); font-weight: 700; color: var(--color-text); }
 
+/* Phase 3 — supporting experience.
+   .account-card: signed-in identity block on the Profile page.
+   .about-lede: lead paragraph on the About page. */
+.account-card { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.account-name { font-size: var(--text-md); font-weight: 700; color: var(--color-text); }
+.account-username { font-size: var(--text-sm); color: var(--color-text-2); margin-top: 0.15rem; }
+.about-lede {
+    font-size: var(--text-md);
+    line-height: 1.65;
+    color: var(--color-text);
+    max-width: 44rem;
+    padding: 0.2rem 0 0.4rem;
+}
+
 /* ── 16. Exercise Library cards ───────────────────────────────── */
 .ex-card {
     background: var(--color-surface);
@@ -483,4 +497,16 @@ hr {
     section[data-testid="stSidebar"] { width: 240px; min-width: 240px; }
     .ex-detail-media { flex-direction: column; }
     .ex-detail-media img { width: 100%; height: auto; }
+}
+
+/* Supporting-experience polish: single-column forms at narrow widths.
+   Scoped to the Profile/Settings/About pages' content, not app-wide. */
+@media (max-width: 720px) {
+    .block-container { padding-left: 1rem; padding-right: 1rem; }
+    .page-head-title { font-size: 1.3rem; }
+    .section-title { margin-top: 1.2rem; }
+    .about-lede { font-size: var(--text-base); }
+    .account-card { flex-direction: column; align-items: flex-start; }
+    [data-testid="stForm"] { padding: var(--space-3); }
+    [data-testid="stMetric"], .stat-card { padding: 0.7rem 0.8rem; }
 }

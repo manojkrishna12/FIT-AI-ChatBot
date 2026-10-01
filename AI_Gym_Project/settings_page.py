@@ -11,8 +11,9 @@ import streamlit as st
 
 from auth import current_username, is_authenticated
 from constants import GEMINI_MODEL, MONGODB_DB_NAME
-from m import page_header
+from m import page_header, section_header
 from storage import get_storage_status
+from ui import stat_row
 
 
 def render_settings_page() -> None:
@@ -22,29 +23,46 @@ def render_settings_page() -> None:
         "Session, integrations and data overview",
     )
 
-    st.subheader("Session")
+    section_header("Session")
     if is_authenticated():
-        st.markdown(f"- **Account:** `{current_username()}`")
-        st.markdown("- Manage sign-out, password and your fitness profile on the **Profile** page.")
+        st.markdown(
+            f"Signed in as **{current_username()}**. Manage sign-out, password and your "
+            "fitness profile on the **Profile** page."
+        )
     else:
-        st.markdown("- **Identity:** guest (browse freely; sign in from the **Profile** page to persist your data)")
+        st.markdown(
+            "Browsing as **guest** — sign in from the **Profile** page to persist your data."
+        )
     user_id = st.session_state.get("active_user_id", "guest")
-    st.markdown(f"- **Active user id:** `{user_id}` — keys your saved plans, chat and routines.")
+    st.caption(f"Active user id: {user_id} — keys your saved plans, chat and routines.")
 
-    st.markdown("---")
-    st.subheader("Integrations")
+    section_header("Integrations")
     gemini_ok = bool(os.environ.get("GEMINI_API_KEY", "").strip())
     mongo_ok, mongo_msg = get_storage_status()
-    st.markdown(
-        f"- **AI provider:** Google Gemini (`{GEMINI_MODEL}`) — {'✅ configured' if gemini_ok else '⚠️ not configured (add GEMINI_API_KEY to .env)'}"
+    stat_row(
+        [
+            {
+                "label": "AI provider",
+                "value": "Gemini",
+                "hint": f"{GEMINI_MODEL} — configured" if gemini_ok else "GEMINI_API_KEY not set in .env",
+            },
+            {
+                "label": "Storage",
+                "value": "MongoDB" if mongo_ok else "Unavailable",
+                "hint": mongo_msg,
+            },
+        ]
     )
-    st.markdown(f"- **Storage:** {mongo_msg}")
+    if not mongo_ok:
+        st.warning(
+            "MongoDB is unavailable. The app keeps working in-session, but plans, "
+            "routines and profiles cannot be saved until it is reachable."
+        )
 
-    st.markdown("---")
-    st.subheader("Data")
+    section_header("Data")
     st.markdown(
         "- Saved plans, chat history and routines are stored per user id in MongoDB.\n"
-        "- Clearing the chat lives on the **Gym Buddy** page; routine deletion on the **Routines** page.\n"
+        "- Clearing the chat lives on the **Gym Buddy** page; routine deletion on the **Workouts** page.\n"
         "- Signing out returns the session to the shared guest identity."
     )
     st.caption("Version 2.0 — development build")

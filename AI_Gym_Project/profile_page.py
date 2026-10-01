@@ -2,6 +2,7 @@
 Profile page — account management and the fitness profile that personalizes
 AI plans. Guests are offered sign-in/registration; the profile form is
 available to signed-in users and feeds the trainer/diet form prefills.
+Authentication and profile logic live in auth.py and are untouched here.
 """
 
 from __future__ import annotations
@@ -19,12 +20,15 @@ from auth import (
     sign_in,
     sign_out,
 )
-from m import page_header
+from m import page_header, section_header
 
 
 def _render_auth_panel() -> None:
-    st.info("You are browsing as **guest**. Create an account so your routines, profile and saved plans stay tied to you.")
-    tab_login, tab_register = st.tabs(["🔑 Sign in", "🆕 Create account"])
+    st.info(
+        "You are browsing as a guest. Create an account so your routines, profile "
+        "and saved plans stay tied to you."
+    )
+    tab_login, tab_register = st.tabs(["Sign in", "Create account"])
 
     with tab_login:
         with st.form("login_form", clear_on_submit=False):
@@ -35,7 +39,7 @@ def _render_auth_panel() -> None:
             ok, message = authenticate(username, password)
             if ok:
                 sign_in(username)
-                st.toast(f"Welcome back, {normalize_username(username)}!", icon="🔑")
+                st.toast(f"Welcome back, {normalize_username(username)}!")
                 st.rerun()
             else:
                 st.error(message)
@@ -54,7 +58,7 @@ def _render_auth_panel() -> None:
                 ok, message = register_user(new_user, new_pass, display)
                 if ok:
                     sign_in(normalize_username(new_user))
-                    st.toast("Account created — you are signed in!", icon="🎉")
+                    st.toast("Account created — you are signed in.")
                     st.rerun()
                 else:
                     st.error(message)
@@ -65,12 +69,22 @@ def _render_account_panel() -> None:
 
     username = current_username()
     display = get_account_display_name() or username
-    st.success(f"Signed in as **{display}** (`{username}`)")
-    if st.button("🚪 Sign out", use_container_width=True):
+    st.markdown(
+        f"""
+        <div class="ui-card account-card">
+          <div>
+            <div class="account-name">{display}</div>
+            <div class="account-username">{username}</div>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("Sign out", use_container_width=True):
         sign_out()
         st.rerun()
 
-    with st.expander("🔒 Change password"):
+    with st.expander("Change password"):
         with st.form("password_form", clear_on_submit=True):
             current_pw = st.text_input("Current password", type="password", key="pw_cur")
             new_pw = st.text_input("New password (min 8 characters)", type="password", key="pw_new")
@@ -90,8 +104,10 @@ def _render_account_panel() -> None:
 def _render_profile_form() -> None:
     profile = get_profile()
 
-    st.subheader("Fitness profile")
-    st.caption("These details prefill the AI Gym Trainer and Diet Coach forms so your plans stay consistent.")
+    section_header(
+        "Fitness profile",
+        "These details prefill the AI Gym Trainer and Diet Coach forms so your plans stay consistent.",
+    )
 
     with st.form("profile_form"):
         c1, c2 = st.columns(2)
@@ -107,7 +123,7 @@ def _render_profile_form() -> None:
             diet_type = st.selectbox("Dietary preference", ["No Restriction", "Vegetarian", "Vegan", "Eggitarian", "Keto", "Mediterranean", "Paleo", "Gluten-Free", "Dairy-Free"], index=max(0, ["No Restriction", "Vegetarian", "Vegan", "Eggitarian", "Keto", "Mediterranean", "Paleo", "Gluten-Free", "Dairy-Free"].index(profile.get("diet_type") or "No Restriction")))
             allergies = st.text_input("Allergies / foods to avoid", value=profile.get("allergies") or "None")
 
-        submitted = st.form_submit_button("💾 Save profile", type="primary", use_container_width=True)
+        submitted = st.form_submit_button("Save profile", type="primary", use_container_width=True)
 
     if submitted:
         ok = save_profile(
@@ -136,10 +152,10 @@ def render_profile_page() -> None:
 
     if not is_authenticated():
         _render_auth_panel()
-        st.markdown("---")
-        st.caption("Sign in to edit your fitness profile.")
+        st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
+        st.caption("Sign in to edit your fitness profile — your details prefill every AI form.")
         return
 
     _render_account_panel()
-    st.markdown("---")
+    st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
     _render_profile_form()
