@@ -80,8 +80,22 @@ def delete_session(user_id: str, session_id) -> bool:
     return coll.delete_one({"_id": oid, "user_id": user_id}).deleted_count > 0
 
 
+def _parse_weight(value) -> float:
+    """Best-effort numeric weight (kg); anything non-positive/invalid is 0."""
+    try:
+        weight = float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return weight if weight > 0 else 0.0
+
+
 def _session_volume(session: dict) -> float:
-    """Sum sets × reps over the session (reps like '8-10' use the lower bound)."""
+    """Sum training load per session.
+
+    Per exercise: sets × reps, multiplied by recorded weight (kg) when the
+    exercise carries one. Exercises without weight (bodyweight or unspecified
+    — the legacy shape) count sets × reps only.
+    """
     total = 0.0
     for exercise in session.get("exercises") or []:
         sets = float(exercise.get("sets") or 0)
@@ -90,7 +104,11 @@ def _session_volume(session: dict) -> float:
             reps = float(reps_raw)
         except ValueError:
             reps = 0.0
-        total += sets * reps
+        volume = sets * reps
+        weight = _parse_weight(exercise.get("weight"))
+        if weight > 0:
+            volume *= weight
+        total += volume
     return total
 
 
@@ -99,8 +117,13 @@ def _session_volume(session: dict) -> float:
 # ────────────────────────────────────────────────────────────────────────────
 
 
-def _session_editor(default_name: str = "", preset: dict | None = None) -> dict | None:
-    """Collect one workout session; returns the payload when submitted."""
+def _session_editor(default_name: str = "", preset: dict | None = None, key_prefix: str = "custom") -> dict | None:
+    """Collect one workout session; returns the payload when submitted.
+
+    ``key_prefix`` scopes the per-exercise widget keys to the logging mode
+    (and routine), so switching modes or routines re-instantiates the rows
+    with the new preset values instead of retaining stale widget state.
+    """
     preset = preset or {"exercises": []}
     with st.form("log_session_form"):
         c1, c2 = st.columns(2)
@@ -114,16 +137,25 @@ def _session_editor(default_name: str = "", preset: dict | None = None) -> dict 
         edited: list[dict] = []
         st.markdown("**Exercises**")
         for idx, exercise in enumerate(exercises):
-            row = st.columns([4, 1, 1, 1])
+            row = st.columns([4, 1, 1, 1, 1])
             with row[0]:
-                ename = st.text_input("Exercise", value=exercise.get("exercise_name", ""), key=f"se_name_{idx}", label_visibility="collapsed")
+                ename = st.text_input("Exercise", value=exercise.get("exercise_name", ""), key=f"se_name_{key_prefix}_{idx}", label_visibility="collapsed")
             with row[1]:
-                sets = st.number_input("Sets", 1, 30, int(exercise.get("sets") or 3), key=f"se_sets_{idx}", label_visibility="collapsed")
+                sets = st.number_input("Sets", 1, 30, int(exercise.get("sets") or 3), key=f"se_sets_{key_prefix}_{idx}", label_visibility="collapsed")
             with row[2]:
-                reps = st.text_input("Reps", value=str(exercise.get("reps") or "8-10"), key=f"se_reps_{idx}", label_visibility="collapsed")
+                reps = st.text_input("Reps", value=str(exercise.get("reps") or "8-10"), key=f"se_reps_{key_prefix}_{idx}", label_visibility="collapsed")
             with row[3]:
-                rest = st.text_input("Rest", value=str(exercise.get("rest") or ""), key=f"se_rest_{idx}", label_visibility="collapsed")
-            edited.append({"exercise_name": ename.strip()[:80], "sets": int(sets), "reps": reps.strip()[:20], "rest": rest.strip()[:20]})
+                rest = st.text_input("Rest", value=str(exercise.get("rest") or ""), key=f"se_rest_{key_prefix}_{idx}", label_visibility="collapsed")
+            with row[4]:
+                weight = st.number_input(
+                    "Weight (kg)", 0.0, 1000.0,
+                    value=float(_parse_weight(exercise.get("weight"))), step=2.5,
+                    key=f"se_weight_{key_prefix}_{idx}", label_visibility="collapsed",
+                )
+            entry = {"exercise_name": ename.strip()[:80], "sets": int(sets), "reps": reps.strip()[:20], "rest": rest.strip()[:20]}
+            if weight > 0:
+                entry["weight"] = round(float(weight), 1)
+            edited.append(entry)
 
         submitted = st.form_submit_button("Log workout", type="primary", use_container_width=True)
 
@@ -161,12 +193,17 @@ def _render_logging() -> None:
                 "sets": ex.get("sets"),
                 "reps": ex.get("reps"),
                 "rest": ex.get("rest"),
+                "weight": ex.get("weight"),
             }
             for ex in (routine.get("days") or [{}])[0].get("exercises") or []
         ]
         if not exercises:
             st.info("That routine's Day 1 has no exercises — pick another routine or log a custom workout.")
-        session = _session_editor(default_name=routine.get("name", ""), preset={"exercises": exercises})
+        session = _session_editor(
+            default_name=routine.get("name", ""),
+            preset={"exercises": exercises},
+            key_prefix=str(routine["_id"]),
+        )
         if session:
             session["routine_id"] = str(routine["_id"])
             _save_and_toast(user_id, session)
@@ -239,7 +276,7 @@ def _render_charts(sessions: list[dict]) -> None:
         {"label": "Sessions logged", "value": str(len(sessions))},
         {"label": "Current streak", "value": f"{current if active else 0}", "hint": "consecutive days"},
         {"label": "Longest streak", "value": f"{best}", "hint": "consecutive days"},
-        {"label": "Total volume", "value": f"{total_volume:,.0f}", "hint": "sets × reps"},
+        {"label": "Total volume", "value": f"{total_volume:,.0f}", "hint": "sets × reps × load"},
     ])
 
     if len(sessions) < 2:
@@ -256,7 +293,7 @@ def _render_charts(sessions: list[dict]) -> None:
     c1, c2 = st.columns(2)
     with c1:
         st.bar_chart(frame.set_index("date")["volume"], height=220)
-        st.caption("Volume per session (sets × reps)")
+        st.caption("Volume per session (sets × reps × load)")
     with c2:
         st.line_chart(frame.set_index("date")["exercises"], height=220)
         st.caption("Exercises per session")

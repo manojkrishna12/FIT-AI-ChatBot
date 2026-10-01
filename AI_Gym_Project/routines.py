@@ -32,6 +32,31 @@ def _empty_day(index: int) -> dict:
     return {"day_name": f"Day {index + 1}", "exercises": []}
 
 
+def _clean_exercise(ex: dict) -> dict | None:
+    """Normalize one builder exercise row into its saved shape.
+
+    Weight (kg) is optional: empty, zero or invalid values are omitted so
+    pre-weight routines keep their exact document shape, and bodyweight
+    exercises stay unweighted by leaving the field at 0.
+    """
+    if not ex.get("exercise_id"):
+        return None
+    clean = {
+        "exercise_id": ex.get("exercise_id"),
+        "exercise_name": ex.get("exercise_name"),
+        "sets": int(ex.get("sets") or 3),
+        "reps": str(ex.get("reps") or "").strip()[:20],
+        "rest": str(ex.get("rest") or "").strip()[:20],
+    }
+    try:
+        weight = float(ex.get("weight") or 0)
+    except (TypeError, ValueError):
+        weight = 0.0
+    if weight > 0:
+        clean["weight"] = round(min(weight, 1000.0), 1)
+    return clean
+
+
 def _blank_builder() -> dict:
     return {"_id": None, "name": "", "notes": "", "days": [_empty_day(0)], "_ver": 0}
 
@@ -93,7 +118,7 @@ def _render_saved_list() -> None:
         empty_state(
             "No workouts yet",
             "Create a workout routine from the Exercise Library — structure training days,"
-            " pick exercises and set sets, reps and rest.",
+            " pick exercises and set sets, reps, rest and weight.",
         )
         return
 
@@ -164,7 +189,7 @@ def _render_builder(catalog: list[dict]) -> None:
             if not exercises:
                 st.caption("No exercises yet — add one below.")
             for ex_idx, exercise in enumerate(exercises):
-                row = st.columns([4, 1, 1, 1, 0.7])
+                row = st.columns([4, 1, 1, 1, 1, 0.7])
                 with row[0]:
                     labels = {d["_id"]: _picker_label(d) for d in catalog}
                     current_id = exercise.get("exercise_id")
@@ -199,6 +224,13 @@ def _render_builder(catalog: list[dict]) -> None:
                         label_visibility="collapsed",
                     )
                 with row[4]:
+                    exercise["weight"] = st.number_input(
+                        "Weight (kg)", 0.0, 1000.0,
+                        value=float(exercise.get("weight") or 0.0), step=2.5,
+                        key=f"ex_weight_{ver}_{day_idx}_{ex_idx}",
+                        label_visibility="collapsed",
+                    )
+                with row[5]:
                     if st.button("✕", key=f"ex_del_{ver}_{day_idx}_{ex_idx}", use_container_width=True):
                         exercises.pop(ex_idx)
                         st.rerun()
@@ -206,7 +238,7 @@ def _render_builder(catalog: list[dict]) -> None:
             bcol1, bcol2, _ = st.columns([1, 1, 2])
             with bcol1:
                 if st.button("Add exercise", key=f"ex_add_{ver}_{day_idx}"):
-                    exercises.append({"exercise_id": None, "exercise_name": "", "sets": 3, "reps": "8-10", "rest": "90s"})
+                    exercises.append({"exercise_id": None, "exercise_name": "", "sets": 3, "reps": "8-10", "rest": "90s", "weight": 0.0})
                     st.rerun()
             with bcol2:
                 if st.button("Add day", key=f"day_add_{ver}_{day_idx}"):
@@ -220,15 +252,9 @@ def _render_builder(catalog: list[dict]) -> None:
                 {
                     "day_name": (day.get("day_name") or f"Day {i + 1}").strip()[:60],
                     "exercises": [
-                        {
-                            "exercise_id": ex.get("exercise_id"),
-                            "exercise_name": ex.get("exercise_name"),
-                            "sets": int(ex.get("sets") or 3),
-                            "reps": str(ex.get("reps") or "").strip()[:20],
-                            "rest": str(ex.get("rest") or "").strip()[:20],
-                        }
+                        cleaned
                         for ex in day.get("exercises") or []
-                        if ex.get("exercise_id")
+                        if (cleaned := _clean_exercise(ex)) is not None
                     ],
                 }
                 for i, day in enumerate(days)
