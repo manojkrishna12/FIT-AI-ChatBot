@@ -96,15 +96,56 @@ def sentiment_emoji(sentiment: str) -> str:
 
 
 
+_GROUNDING_RULES = """
+Reference knowledge (from the FitAI exercise library) may accompany the user's message below.
+When it is present:
+- Use it as the source of truth for exercise-specific facts: names, muscles, equipment,
+  difficulty, steps and tips.
+- Do not invent exercise-specific details that the reference knowledge does not support.
+- Do not mention the reference knowledge, retrieval, embeddings, scores or any internal
+  systems in your reply — just answer naturally as FitBot.
+When it is absent or irrelevant to the question, simply answer normally.
+"""
+
+
+def build_grounded_context(user_msg: str) -> str:
+    """Retrieve exercise knowledge for a user message.
+
+    Returns '' whenever retrieval yields nothing (unrelated question, empty
+    knowledge base, MongoDB/RAG unavailable or any internal failure) — Gym
+    Buddy must behave exactly as before in every one of those cases.
+    """
+    try:
+        from rag import build_context, search
+
+        return build_context(search(user_msg))
+    except Exception:
+        return ""
+
+
 def chat_with_buddy(user_msg: str, history: list[dict]) -> str:
-    """Generate a FitBot reply using recent conversation context."""
-# Format messages for OpenRouter (OpenAI-compatible)
-    messages = [{"role": "system", "content": _BUDDY_SYSTEM}]
-    
+    """Generate a FitBot reply using recent conversation context.
+
+    Exercise knowledge retrieved for the user message (when any) is prepended
+    to the user turn as clearly separated reference material; the conversation
+    flow itself is unchanged.
+    """
+    user_content = user_msg
+    reference = build_grounded_context(user_msg)
+    if reference:
+        user_content = (
+            "--- REFERENCE KNOWLEDGE (do not mention to the user) ---\n"
+            f"{reference}\n"
+            "--- END REFERENCE KNOWLEDGE ---\n\n"
+            f"User's message: {user_msg}"
+        )
+
+    messages = [{"role": "system", "content": _BUDDY_SYSTEM + _GROUNDING_RULES}]
+
     for turn in history[-CHAT_CONTEXT_TURNS:]:
         messages.append({"role": turn["role"], "content": turn["content"]})
-        
-    messages.append({"role": "user", "content": user_msg})
+
+    messages.append({"role": "user", "content": user_content})
 
     prompt = "\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
     return get_gemini_response(prompt)
