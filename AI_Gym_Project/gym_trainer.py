@@ -7,8 +7,10 @@ Features:
   • Pose detection & landmark drawing on uploaded images/videos
   • Joint-angle calculation → rep counting with state machine
   • Per-exercise form feedback (rule-based + Gemini AI)
-  • Personalised 7-day workout plan generator (Gemini)
-  • Kaggle exercise database browser
+  • Live webcam tracking
+
+The AI workout planner lives here too, but it is surfaced on the Workouts
+page (Training → Workouts) via render_workout_planner().
 """
 
 import os
@@ -40,14 +42,12 @@ from m import (
     get_landmark_coords,
     get_gemini_response,
     initialize_gemini,
-    load_exercise_data,
     page_header,
     section_header,
     section_tabs,
     stat_row,
 )
 from storage import append_session_history, save_current_user_state
-from auth import profile_prefill
 from auth import profile_prefill
 from constants import (
     EXERCISE_CONFIG,
@@ -452,13 +452,89 @@ End with a weekly summary and top motivational note.
 # 🖥️  STREAMLIT PAGE RENDERER
 # ══════════════════════════════════════════════════════════════
 
+# Tabs of the AI Gym Trainer page. Pose analysis only: the exercise catalog
+# has its own page (Training → Exercise Library) and the AI workout planner is
+# surfaced on Training → Workouts.
+TRAINER_TABS: list[str] = ["Image Analysis", "Video Analysis", "Live Webcam"]
+
+
+def render_workout_planner() -> None:
+    """AI workout planner — rendered by the Workouts page.
+
+    Reuses the existing Gemini prompt (ai_workout_plan) and keeps the saved
+    plan history in the session exactly as before.
+    """
+    model = None
+
+    if st.session_state.get("workout_plan_history"):
+        with st.expander("Saved workout plans"):
+            for item in st.session_state["workout_plan_history"][:5]:
+                st.markdown(f"**{item['created_at']}** - {item.get('goal', 'Workout Plan')}")
+                st.caption(item["plan"][:280] + "...")
+
+    with st.form("workout_form"):
+        r1c1, r1c2 = st.columns(2)
+        with r1c1:
+            name   = st.text_input("Your Name", str(profile_prefill("name", "Athlete")))
+            age    = st.number_input("Age", 12, 80, int(profile_prefill("age", 22)))
+            weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile_prefill("weight_kg", 68.0)), step=0.5)
+            height = st.number_input("Height (cm)", 100.0, 250.0, float(profile_prefill("height_cm", 170.0)), step=0.5)
+        with r1c2:
+            level   = st.selectbox("Fitness Level", ["Beginner", "Intermediate", "Advanced"])
+            goal    = st.selectbox(
+                "Primary Goal",
+                ["Weight Loss", "Muscle Gain", "General Fitness",
+                 "Endurance", "Strength", "Flexibility"]
+            )
+            equip   = st.multiselect(
+                "Equipment Available",
+                ["Dumbbells", "Barbell", "Resistance Bands",
+                 "Pull-up Bar", "Treadmill", "Kettlebell", "None"],
+                default=["None"]
+            )
+            days    = st.slider("Training Days per Week", 1, 7, 4)
+            health  = st.text_input("Health notes / injuries (optional)", "None")
+
+        submitted = st.form_submit_button("Generate workout plan", use_container_width=True)
+
+    if submitted:
+        user_data = {
+            "name": name, "age": age, "weight": weight, "height": height,
+            "level": level, "goal": goal,
+            "equipment": ", ".join(equip) if equip else "None",
+            "days": days, "health": health,
+        }
+        with st.spinner("Creating your personalised plan…"):
+            plan = ai_workout_plan(user_data, model)
+        st.success("Your workout plan is ready.")
+        st.markdown(plan)
+        append_session_history(
+            "workout_plan_history",
+            {
+                "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "goal": goal,
+                "plan": plan,
+            },
+        )
+        save_current_user_state()
+        st.download_button(
+            "Download plan",
+            plan, file_name=f"{name}_workout_plan.txt", mime="text/plain"
+        )
+
+    close_col, _ = st.columns([1, 3])
+    with close_col:
+        if st.button("Close planner", key="planner_close", use_container_width=True):
+            st.session_state.pop("ai_planner_open", None)
+            st.rerun()
+
+
 def render_gym_trainer_page() -> None:
     """Entry point called by app.py for the Gym Trainer page."""
     page_header("AI Gym Trainer",
                 "Upload a photo or video — get instant pose analysis, rep counts and AI coaching")
 
-    model       = None
-    exercise_df = load_exercise_data()
+    model = None
     pose_stack_ready = _pose_stack_available()
 
     if not pose_stack_ready:
@@ -467,15 +543,11 @@ def render_gym_trainer_page() -> None:
             "`mediapipe` are not installed in the current Python environment."
         )
         st.caption(
-            "Image analysis and video rep counting are temporarily disabled. "
-            "The workout planner and exercise database still work."
+            "Image and video analysis are temporarily disabled. The AI Workout "
+            "Planner on the Workouts page still works."
         )
 
-    mode = section_tabs(
-        ["Image Analysis", "Video & Reps", "Workout Plan", "Exercise Database", "Live Webcam"],
-        key="trainer_mode",
-        default="Image Analysis",
-    )
+    mode = section_tabs(TRAINER_TABS, key="trainer_mode", default=TRAINER_TABS[0])
 
     # ── MODE 1 : Image Analysis ───────────────────────────────────
     if mode == "Image Analysis":
@@ -522,7 +594,7 @@ def render_gym_trainer_page() -> None:
                     st.warning(line)
 
     # ── MODE 2 : Video Analysis ───────────────────────────────────
-    elif mode == "Video & Reps":
+    elif mode == "Video Analysis":
         section_header("Video rep counter & angle tracking")
         col_l, _ = st.columns([1, 1])
         with col_l:
@@ -570,96 +642,7 @@ def render_gym_trainer_page() -> None:
                     "and the selected exercise matches the video."
                 )
 
-    # ── MODE 3 : Workout Plan ─────────────────────────────────────
-    elif mode == "Workout Plan":
-        section_header("Workout plan generator")
-
-        if st.session_state.get("workout_plan_history"):
-            with st.expander("Saved Workout Plans"):
-                for item in st.session_state["workout_plan_history"][:5]:
-                    st.markdown(f"**{item['created_at']}** - {item.get('goal', 'Workout Plan')}")
-                    st.caption(item["plan"][:280] + "...")
-
-        with st.form("workout_form"):
-            r1c1, r1c2 = st.columns(2)
-            with r1c1:
-                name   = st.text_input("Your Name", str(profile_prefill("name", "Athlete")))
-                age    = st.number_input("Age", 12, 80, int(profile_prefill("age", 22)))
-                weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile_prefill("weight_kg", 68.0)), step=0.5)
-                height = st.number_input("Height (cm)", 100.0, 250.0, float(profile_prefill("height_cm", 170.0)), step=0.5)
-            with r1c2:
-                level   = st.selectbox("Fitness Level", ["Beginner", "Intermediate", "Advanced"])
-                goal    = st.selectbox(
-                    "Primary Goal",
-                    ["Weight Loss", "Muscle Gain", "General Fitness",
-                     "Endurance", "Strength", "Flexibility"]
-                )
-                equip   = st.multiselect(
-                    "Equipment Available",
-                    ["Dumbbells", "Barbell", "Resistance Bands",
-                     "Pull-up Bar", "Treadmill", "Kettlebell", "None"],
-                    default=["None"]
-                )
-                days    = st.slider("Training Days per Week", 1, 7, 4)
-                health  = st.text_input("Health notes / injuries (optional)", "None")
-
-            submitted = st.form_submit_button("Generate My Workout Plan", use_container_width=True)
-
-        if submitted:
-            user_data = {
-                "name": name, "age": age, "weight": weight, "height": height,
-                "level": level, "goal": goal,
-                "equipment": ", ".join(equip) if equip else "None",
-                "days": days, "health": health,
-            }
-            with st.spinner("Creating your personalised plan…"):
-                plan = ai_workout_plan(user_data, model)
-            st.success("Your workout plan is ready.")
-            st.markdown(plan)
-            append_session_history(
-                "workout_plan_history",
-                {
-                    "created_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "goal": goal,
-                    "plan": plan,
-                },
-            )
-            save_current_user_state()
-            st.download_button(
-                "Download plan",
-                plan, file_name=f"{name}_workout_plan.txt", mime="text/plain"
-            )
-
-    # ── MODE 4 : Exercise Database ────────────────────────────────
-    elif mode == "Exercise Database":
-        section_header("Exercise database")
-        if not exercise_df.empty:
-            col_f1, col_f2 = st.columns(2)
-            with col_f1:
-                search = st.text_input("Search exercise", placeholder="e.g. chest, deadlift")
-            with col_f2:
-                body_parts = ["All"]
-                bp_col = next((c for c in exercise_df.columns if "body" in c.lower()), None)
-                if bp_col:
-                    body_parts += sorted(exercise_df[bp_col].dropna().unique().tolist())
-                bp_filter = st.selectbox("Filter by body part", body_parts)
-
-            filtered = exercise_df.copy()
-            if search:
-                title_col = next((c for c in filtered.columns if "title" in c.lower()), filtered.columns[0])
-                filtered = filtered[
-                    filtered[title_col].astype(str).str.lower().str.contains(search.lower(), na=False)
-                ]
-            if bp_filter != "All" and bp_col:
-                filtered = filtered[filtered[bp_col] == bp_filter]
-
-            st.dataframe(filtered.head(50), use_container_width=True)
-            st.caption(f"Showing {min(50, len(filtered))} of {len(filtered)} exercises")
-        else:
-            st.info("Place exercises.csv in the Data/ folder to enable the full exercise database.")
-
-
-    # ── MODE 5 : Live Webcam ──────────────────────────────────────
+    # ── MODE 3 : Live Webcam ──────────────────────────────────────
     elif mode == "Live Webcam":
         section_header("Live webcam tracking")
         st.markdown(

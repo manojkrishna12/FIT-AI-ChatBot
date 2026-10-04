@@ -25,12 +25,13 @@ def test_training_subsection_labels():
 
 
 def test_nutrition_subsection_labels():
+    """Nutrition is Diet Coach, Meal Analyser and Calorie Tracker only."""
     assert app.SECTION_PAGES["Nutrition"] == [
         "Diet Coach",
         "Meal Analyser",
         "Calorie Tracker",
-        "Grocery List",
     ]
+    assert "Grocery List" not in app.ROUTES
 
 
 def test_every_label_routes():
@@ -73,7 +74,6 @@ def test_all_destination_pages_importable():
         "exercise_library": ("exercise_library", "render_exercise_library_page"),
         "diet": ("diet", "render_diet_page"),
         "meal_analyser": ("nutrition", "render_meal_analyser_page"),
-        "grocery_list": ("nutrition", "render_grocery_list_page"),
         "calorie_tracker": ("nutrition", "render_calorie_tracker_page"),
         "buddy": ("habit_tracker", "render_gym_buddy_page"),
         "progress": ("progress", "render_progress_page"),

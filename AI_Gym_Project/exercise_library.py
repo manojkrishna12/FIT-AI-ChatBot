@@ -50,7 +50,7 @@ def _image_data_uri(filename: str) -> str | None:
         return None
 
 
-def _image_html(filename: str | None) -> str:
+def image_html(filename: str | None) -> str:
     """Return an <img> tag for a GridFS image, with a URL fallback for missing ones."""
     if filename:
         uri = _image_data_uri(filename)
@@ -63,6 +63,10 @@ def _image_html(filename: str | None) -> str:
                 f'onerror="this.style.display=\'none\'" style="background:#f6f7f9"/>'
             )
     return '<div class="media-fallback">No image</div>'
+
+
+# Internal alias kept for the library's own card rendering.
+_image_html = image_html
 
 
 def _load_catalog() -> list[dict]:

@@ -101,18 +101,33 @@ def _render_account_panel() -> None:
                     st.error(message)
 
 
+def _effective_display_name(profile: dict, account_name: str = "", username: str = "") -> str:
+    """Reuse the account identity as the profile name — never ask for it again."""
+    for value in (profile.get("name"), account_name, username):
+        text = str(value or "").strip()
+        if text:
+            return text[:60]
+    return ""
+
+
 def _render_profile_form() -> None:
+    from auth import current_username, get_account_display_name
+
     profile = get_profile()
+    account_name = (get_account_display_name() or "").strip()
+    identity = account_name or (current_username() or "")
+    # The display name lives on the account — the fitness profile only reuses it.
+    effective_name = _effective_display_name(profile, account_name, current_username() or "")
 
     section_header(
         "Fitness profile",
         "These details prefill the AI Gym Trainer and Diet Coach forms so your plans stay consistent.",
     )
+    st.caption(f"Display name: {identity or '—'} — from your account.")
 
     with st.form("profile_form"):
         c1, c2 = st.columns(2)
         with c1:
-            name = st.text_input("Display name", value=profile.get("name") or "")
             age = st.number_input("Age", 10, 100, int(profile.get("age") or 22))
             gender = st.selectbox("Gender", ["Male", "Female", "Other"], index=["Male", "Female", "Other"].index(profile.get("gender") or "Male"))
             weight = st.number_input("Weight (kg)", 30.0, 200.0, float(profile.get("weight_kg") or 68.0), step=0.5)
@@ -127,7 +142,7 @@ def _render_profile_form() -> None:
 
     if submitted:
         ok = save_profile(
-            name=name.strip()[:60],
+            name=effective_name,
             age=int(age),
             gender=gender,
             weight_kg=float(weight),
@@ -138,7 +153,9 @@ def _render_profile_form() -> None:
             allergies=allergies.strip()[:120] or "None",
         )
         if ok:
-            st.success("Profile saved — your AI forms will use these details.")
+            st.toast("Profile saved.")
+            st.session_state["_navigate_to"] = "Home"
+            st.rerun()
         else:
             st.warning("Could not save: profiles are tied to accounts. Sign in above and try again.")
 

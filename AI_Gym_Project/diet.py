@@ -218,31 +218,6 @@ Respond ONLY with a valid JSON object in the following format (NO markdown block
         print(f"[DIET] Gemini success/failure: FAILURE (Exception: {e})")
         return get_fallback()
 
-def ai_grocery_list(meal_plan: str, model=None) -> str:
-    """Generate a grocery list from a meal plan."""
-    prompt = f"""
-Based on this 7-day meal plan, generate a weekly grocery list for one person.
-
-Meal plan:
-{meal_plan[:3000]}
-
-CRITICAL:
-1. Group items logically exactly into these categories: Produce, Protein, Grains/Carbohydrates, Dairy, Other.
-2. Avoid duplicate items. Combine quantities if necessary.
-3. End with 2 practical shopping tips.
-"""
-    try:
-        resp = get_gemini_response(prompt)
-        if "Add a Gemini API key" in resp or "Error" in resp:
-            # Deterministic fallback if API fails
-            fallback = ["**Fallback Grocery List (Generated from items)**"]
-            return "\\n".join(fallback) + "\\n\\nPlease configure API key for intelligent grouping."
-        return resp
-    except Exception as e:
-        print(f"[Dietician] Grocery List Error: {e}")
-        return "AI service is temporarily unavailable. Please try again in a moment."
-
-
 def ai_meal_analysis_structured(meal_description: str, model=None) -> dict | None:
     """Generate a nutrition breakdown for a meal; structured dict, None if unavailable."""
     prompt = f"""Analyze this meal and return ONLY a valid JSON object (no markdown formatting, no extra text).
@@ -622,35 +597,6 @@ def _tab2_meal_analyser() -> None:
             st.rerun()
 
 
-def _tab3_grocery_list() -> None:
-    """Grocery list tool (page body)."""
-    model = None  # Gemini client; helpers create their own when None
-    section_header("Grocery list", "A weekly shopping list from your meal plan")
-    if st.session_state.get("diet_plan"):
-        with st.expander("Your latest meal plan", expanded=False):
-            st.markdown(st.session_state["diet_plan"][:1000] + " …")
-        plan_text = st.session_state["diet_plan"]
-    else:
-        st.info("Generate a diet plan first, or paste one below.")
-        plan_text = st.text_area("Paste meal plan here", height=200, key="manual_plan")
-
-    if st.button("Generate grocery list", type="primary", use_container_width=True, key="grocery_btn"):
-        if plan_text:
-            with st.spinner("Building your weekly grocery list..."):
-                groceries = ai_grocery_list(plan_text, model)
-            section_header("Your weekly grocery list")
-            st.markdown('<div class="plan-output">' + groceries + "</div>", unsafe_allow_html=True)
-            save_current_user_state()
-            st.download_button(
-                "Download grocery list",
-                groceries,
-                file_name="grocery_list.txt",
-                mime="text/plain",
-            )
-        else:
-            st.warning("Please generate or paste a meal plan first.")
-
-
 def _tab4_calorie_tracker() -> None:
     """Calorie tracker tool (page body)."""
     section_header("Calorie tracker", "What you've eaten today and what remains")
@@ -751,13 +697,11 @@ def _tab4_calorie_tracker() -> None:
 
 
 def render_diet_page() -> None:
-    """Render the combined Diet Coach page (all four tools in sequence)."""
+    """Render the combined Diet Coach page (diet plan, meal analyser, tracker)."""
     _page_intro()
     _tab1_diet_plan()
     st.markdown("---")
     _tab2_meal_analyser()
-    st.markdown("---")
-    _tab3_grocery_list()
     st.markdown("---")
     _tab4_calorie_tracker()
 
@@ -770,7 +714,6 @@ def render_diet_page() -> None:
 _NUTRITION_PAGE_LABELS = {
     "diet": "Diet Coach",
     "meal_analyser": "Meal Analyser",
-    "grocery_list": "Grocery List",
     "calorie_tracker": "Calorie Tracker",
 }
 
@@ -794,13 +737,6 @@ def render_meal_analyser_page() -> None:
     _page_intro()
     _tab2_meal_analyser()
     _nutrition_footer("meal_analyser")
-
-
-def render_grocery_list_page() -> None:
-    """Standalone Grocery List page (Diet Coach tool 3)."""
-    _page_intro()
-    _tab3_grocery_list()
-    _nutrition_footer("grocery_list")
 
 
 def render_calorie_tracker_page() -> None:

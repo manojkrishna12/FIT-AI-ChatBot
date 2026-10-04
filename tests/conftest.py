@@ -22,8 +22,7 @@ def session_state(monkeypatch):
     """Provide a dict-backed stand-in for st.session_state."""
     import streamlit as st
 
-    store: dict = {}
-    store.get = store.get  # dict.get already matches the session_state API
+    store: dict = {}  # dict.get already matches the session_state API
 
     class _SS:
         def __getattr__(self, name):
@@ -33,6 +32,12 @@ def session_state(monkeypatch):
                 raise AttributeError(name)
 
         def __setattr__(self, name, value):
+            store[name] = value
+
+        def __getitem__(self, name):
+            return store[name]
+
+        def __setitem__(self, name, value):
             store[name] = value
 
         def get(self, name, default=None):

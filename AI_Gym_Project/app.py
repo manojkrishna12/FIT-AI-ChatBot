@@ -49,7 +49,6 @@ PAGE_TRAINER = "AI Gym Trainer"
 PAGE_DIET = "Diet Coach"
 PAGE_MEAL_ANALYSER = "Meal Analyser"
 PAGE_CALORIE_TRACKER = "Calorie Tracker"
-PAGE_GROCERY = "Grocery List"
 
 MAIN_NAV: list[str] = [
     PAGE_HOME,
@@ -65,7 +64,7 @@ MAIN_NAV: list[str] = [
 # Feature pages per section, rendered with the shared section_tabs component.
 SECTION_PAGES: dict[str, list[str]] = {
     PAGE_TRAINING: [PAGE_WORKOUTS, PAGE_EXERCISE_LIBRARY, PAGE_TRAINER],
-    PAGE_NUTRITION: [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_CALORIE_TRACKER, PAGE_GROCERY],
+    PAGE_NUTRITION: [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_CALORIE_TRACKER],
 }
 
 ROUTES: dict[str, str] = {
@@ -83,7 +82,6 @@ ROUTES: dict[str, str] = {
     PAGE_DIET: "diet",
     PAGE_MEAL_ANALYSER: "meal_analyser",
     PAGE_CALORIE_TRACKER: "calorie_tracker",
-    PAGE_GROCERY: "grocery_list",
 }
 
 
@@ -281,10 +279,6 @@ def _dispatch(target: str) -> None:
         from nutrition import render_meal_analyser_page
 
         render_meal_analyser_page()
-    elif target == "grocery_list":
-        from nutrition import render_grocery_list_page
-
-        render_grocery_list_page()
     elif target == "calorie_tracker":
         from nutrition import render_calorie_tracker_page
 
