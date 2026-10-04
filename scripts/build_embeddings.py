@@ -57,7 +57,14 @@ def main() -> None:
     parser.add_argument("--limit", type=int, default=0, help="Embed only the first N missing exercises")
     parser.add_argument("--force", action="store_true", help="Re-embed exercises that already have embeddings")
     parser.add_argument("--model", default=EMBEDDING_MODEL, help="Embedding model name")
+    parser.add_argument(
+        "--verify",
+        action="store_true",
+        help="Validate existing embeddings (counts, dimensions, models) without calling the API",
+    )
     args = parser.parse_args()
+    if args.verify:
+        raise SystemExit(verify())
 
     if not os.environ.get("GEMINI_API_KEY", "").strip():
         raise SystemExit("error: GEMINI_API_KEY is not set — add it to .env first")
@@ -124,6 +131,53 @@ def main() -> None:
     print(f"done      : {ok} embedded, {failed} failed in {elapsed:.1f}s")
     if ok:
         print("note      : restart the app (or call rag.reset_matrix_cache()) to pick up the new matrix.")
+        print("verify next: python scripts/build_embeddings.py --verify")
+
+
+def verify() -> int:
+    """Validate embedded docs against the catalog without calling the API.
+
+    Reports the total/embedded/valid-dimension counts plus the embedding
+    models found in provenance metadata. Returns a process exit code: 0 when
+    every exercise is embedded with the expected dimension and one model,
+    1 otherwise — safe to use in CI.
+    """
+    try:
+        coll = connect()
+    except Exception as exc:
+        print(f"verify     : MongoDB unavailable ({exc})")
+        return 1
+
+    from collections import Counter
+
+    total = coll.count_documents({})
+    models: Counter[str] = Counter()
+    dims: Counter[int] = Counter()
+    embedded = 0
+    for doc in coll.find({"embedding": {"$exists": True}}, {"embedding": 1, "provenance": 1}):
+        embedded += 1
+        dims[len(doc.get("embedding") or [])] += 1
+        models[(doc.get("provenance") or {}).get("embedding_model") or "unknown"] += 1
+
+    print(f"catalog    : {total} exercises in '{EXERCISE_DB_COLLECTION}'")
+    print(f"embedded   : {embedded}")
+    print(f"dimensions : {dict(dims)} (expected: {EMBEDDING_DIMENSION})")
+    print(f"models     : {dict(models)}")
+
+    problems = []
+    if embedded != total:
+        problems.append(f"{total - embedded} exercises have no embedding")
+    bad_dims = {n: c for n, c in dims.items() if n != EMBEDDING_DIMENSION}
+    if bad_dims:
+        problems.append(f"wrong dimensions: {bad_dims}")
+    unexpected = {m: c for m, c in models.items() if m not in (EMBEDDING_MODEL, "unknown")}
+    if unexpected:
+        problems.append(f"mixes models beyond '{EMBEDDING_MODEL}': {unexpected}")
+    if problems:
+        print("result     : FAILED — " + "; ".join(problems))
+        return 1
+    print(f"result     : OK — all {total} exercises embedded ({EMBEDDING_DIMENSION}-dim, {EMBEDDING_MODEL})")
+    return 0
 
 
 if __name__ == "__main__":

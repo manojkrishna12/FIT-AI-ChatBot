@@ -21,7 +21,7 @@ state and never mutates user data.
 from __future__ import annotations
 
 import os
-from functools import lru_cache
+import time
 
 import numpy as np
 
@@ -31,6 +31,7 @@ from constants import (
     EXERCISE_DB_COLLECTION,
     RAG_MAX_CONTEXT_CHARS,
     RAG_MIN_SCORE,
+    RAG_QUERY_CACHE_TTL_S,
     RAG_TOP_K,
 )
 
@@ -38,6 +39,11 @@ from constants import (
 # whole catalog on every question). Invalidated per process when the
 # embedding model or catalog version changes.
 _MATRIX_CACHE: dict | None = None
+
+# Small FIFO cache for query embeddings ({query_text: (vector, timestamp)}) —
+# repeated questions in one chat session avoid a redundant API round-trip.
+_QUERY_CACHE: dict[str, tuple[list[float], float]] = {}
+_QUERY_CACHE_MAX = 32
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -65,10 +71,10 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
     """
     if not texts:
         return None
-    client = _embedding_client()
-    if client is None:
-        return None
     try:
+        client = _embedding_client()
+        if client is None:
+            return None
         response = client.models.embed_content(
             model=EMBEDDING_MODEL,
             contents=texts,
@@ -86,16 +92,25 @@ def embed_texts(texts: list[str]) -> list[list[float]] | None:
 
 
 def embed_query(text: str) -> list[float] | None:
-    """Embed one user query with task_type=RETRIEVAL_QUERY; None on failure."""
-    if not (text or "").strip():
+    """Embed one user query with task_type=RETRIEVAL_QUERY; None on failure.
+
+    Results are cached briefly per process (TTL: RAG_QUERY_CACHE_TTL_S) so a
+    repeated question in the same session does not re-hit the API.
+    """
+    q = (text or "").strip()
+    if not q:
         return None
-    client = _embedding_client()
-    if client is None:
-        return None
+    now = time.monotonic()
+    cached = _QUERY_CACHE.get(q)
+    if cached and now - cached[1] < RAG_QUERY_CACHE_TTL_S:
+        return list(cached[0])
     try:
+        client = _embedding_client()
+        if client is None:
+            return None
         response = client.models.embed_content(
             model=EMBEDDING_MODEL,
-            contents=[text],
+            contents=[q],
             config={
                 "task_type": "RETRIEVAL_QUERY",
                 "output_dimensionality": EMBEDDING_DIMENSION,
@@ -103,7 +118,13 @@ def embed_query(text: str) -> list[float] | None:
         )
         if not response.embeddings:
             return None
-        return list(response.embeddings[0].values)
+        vector = list(response.embeddings[0].values)
+        if len(vector) != EMBEDDING_DIMENSION:
+            return None
+        _QUERY_CACHE[q] = (vector, time.monotonic())
+        while len(_QUERY_CACHE) > _QUERY_CACHE_MAX:
+            _QUERY_CACHE.pop(next(iter(_QUERY_CACHE)))
+        return list(vector)
     except Exception:
         return None
 
@@ -197,6 +218,11 @@ def reset_matrix_cache() -> None:
     _MATRIX_CACHE = None
 
 
+def reset_query_cache() -> None:
+    """Drop cached query embeddings (used in tests and after model changes)."""
+    _QUERY_CACHE.clear()
+
+
 # ────────────────────────────────────────────────────────────────────────────
 # Search & context formatting
 # ────────────────────────────────────────────────────────────────────────────
@@ -220,7 +246,7 @@ def search(query: str, top_k: int | None = None, min_score: float | None = None)
         return []
 
     q_vec = embed_query(q)
-    if q_vec is None or len(q_vec) != EMBEDDING_DIMENSION:
+    if q_vec is None or len(q_vec) != len(bundle["matrix"][0]):
         return []
 
     q_np = np.asarray([q_vec], dtype=np.float32)

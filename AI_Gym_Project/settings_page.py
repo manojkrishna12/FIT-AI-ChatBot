@@ -39,6 +39,12 @@ def render_settings_page() -> None:
     section_header("Integrations")
     gemini_ok = bool(os.environ.get("GEMINI_API_KEY", "").strip())
     mongo_ok, mongo_msg = get_storage_status()
+    try:
+        from rag import knowledge_base_status
+
+        kb = knowledge_base_status()
+    except Exception:
+        kb = {"available": False, "embedded": 0}
     stat_row(
         [
             {
@@ -50,6 +56,11 @@ def render_settings_page() -> None:
                 "label": "Storage",
                 "value": "MongoDB" if mongo_ok else "Unavailable",
                 "hint": mongo_msg,
+            },
+            {
+                "label": "Gym Buddy knowledge",
+                "value": f"{kb.get('embedded', 0)} exercises" if kb.get("available") else "Unavailable",
+                "hint": f"{kb.get('model')}" if kb.get("available") else "Gym Buddy answers without exercise grounding",
             },
         ]
     )

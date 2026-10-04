@@ -56,6 +56,7 @@ EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "768"))
 RAG_TOP_K = int(os.getenv("RAG_TOP_K", "4"))
 RAG_MIN_SCORE = float(os.getenv("RAG_MIN_SCORE", "0.35"))
 RAG_MAX_CONTEXT_CHARS = int(os.getenv("RAG_MAX_CONTEXT_CHARS", "3500"))
+RAG_QUERY_CACHE_TTL_S = int(os.getenv("RAG_QUERY_CACHE_TTL_S", "600"))
 REPDB_SOURCE_URL = "https://github.com/RepDB/exercise-dataset"
 REPDB_DATASET_URL = "https://exercise-dataset.com/exercises.json"
 REPDB_IMAGES_BASE_URL = "https://raw.githubusercontent.com/RepDB/exercise-dataset/main/"
