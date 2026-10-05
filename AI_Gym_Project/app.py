@@ -304,6 +304,19 @@ def _dispatch(target: str) -> None:
 def main() -> None:
     """Run the application."""
     inject_custom_css()
+
+    # Authentication gate — nothing from the main app (sidebar, Home,
+    # features) renders before a session exists. A valid browser session
+    # cookie restores the previous sign-in after a page reload.
+    from auth import is_authenticated, restore_session
+    from auth_screen import render_auth_screen
+
+    if not is_authenticated():
+        restore_session()
+    if not is_authenticated():
+        render_auth_screen()
+        return
+
     page = build_sidebar()
     ensure_user_state_loaded()
 

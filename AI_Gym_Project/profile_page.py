@@ -1,8 +1,9 @@
 """
-Profile page — account management and the fitness profile that personalizes
-AI plans. Guests are offered sign-in/registration; the profile form is
-available to signed-in users and feeds the trainer/diet form prefills.
-Authentication and profile logic live in auth.py and are untouched here.
+Profile page — the signed-in user's account details and the fitness profile
+that personalizes AI plans. Sign-in/create-account live on the dedicated
+auth screen (auth_screen.py); this page is reached only through the app's
+authentication gate. Authentication and profile logic live in auth.py and
+are untouched here.
 """
 
 from __future__ import annotations
@@ -10,58 +11,13 @@ from __future__ import annotations
 import streamlit as st
 
 from auth import (
-    authenticate,
     change_password,
+    end_session,
     get_profile,
     is_authenticated,
-    normalize_username,
-    register_user,
     save_profile,
-    sign_in,
-    sign_out,
 )
 from m import page_header, section_header
-
-
-def _render_auth_panel() -> None:
-    st.info(
-        "You are browsing as a guest. Create an account so your routines, profile "
-        "and saved plans stay tied to you."
-    )
-    tab_login, tab_register = st.tabs(["Sign in", "Create account"])
-
-    with tab_login:
-        with st.form("login_form", clear_on_submit=False):
-            username = st.text_input("Username", key="login_user")
-            password = st.text_input("Password", type="password", key="login_pass")
-            submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
-        if submitted:
-            ok, message = authenticate(username, password)
-            if ok:
-                sign_in(username)
-                st.toast(f"Welcome back, {normalize_username(username)}!")
-                st.rerun()
-            else:
-                st.error(message)
-
-    with tab_register:
-        with st.form("register_form", clear_on_submit=False):
-            new_user = st.text_input("Username", key="reg_user", help="Letters, numbers, dots, dashes or underscores.")
-            display = st.text_input("Display name (optional)", key="reg_display")
-            new_pass = st.text_input("Password (min 8 characters)", type="password", key="reg_pass")
-            new_pass2 = st.text_input("Confirm password", type="password", key="reg_pass2")
-            submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
-        if submitted:
-            if new_pass != new_pass2:
-                st.error("Passwords do not match.")
-            else:
-                ok, message = register_user(new_user, new_pass, display)
-                if ok:
-                    sign_in(normalize_username(new_user))
-                    st.toast("Account created — you are signed in.")
-                    st.rerun()
-                else:
-                    st.error(message)
 
 
 def _render_account_panel() -> None:
@@ -81,7 +37,7 @@ def _render_account_panel() -> None:
         unsafe_allow_html=True,
     )
     if st.button("Sign out", use_container_width=True):
-        sign_out()
+        end_session()  # revokes the browser session too — lands on the auth screen
         st.rerun()
 
     with st.expander("Change password"):
@@ -157,7 +113,7 @@ def _render_profile_form() -> None:
             st.session_state["_navigate_to"] = "Home"
             st.rerun()
         else:
-            st.warning("Could not save: profiles are tied to accounts. Sign in above and try again.")
+            st.warning("Could not save your profile — the database is unavailable. Try again later.")
 
 
 def render_profile_page() -> None:
@@ -167,10 +123,9 @@ def render_profile_page() -> None:
         "Your account and the fitness details that personalize your AI plans",
     )
 
+    # Defensive only — the app's authentication gate keeps guests out.
     if not is_authenticated():
-        _render_auth_panel()
-        st.markdown('<div class="section-gap"></div>', unsafe_allow_html=True)
-        st.caption("Sign in to edit your fitness profile — your details prefill every AI form.")
+        st.info("Please sign in to view your profile.")
         return
 
     _render_account_panel()

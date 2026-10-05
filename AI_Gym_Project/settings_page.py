@@ -31,7 +31,7 @@ def render_settings_page() -> None:
         )
     else:
         st.markdown(
-            "Browsing as **guest** — sign in from the **Profile** page to persist your data."
+            "Browsing as **guest** — sign in on the welcome screen to persist your data."
         )
     user_id = st.session_state.get("active_user_id", "guest")
     st.caption(f"Active user id: {user_id} — keys your saved plans, chat and routines.")
@@ -74,6 +74,6 @@ def render_settings_page() -> None:
     st.markdown(
         "- Saved plans, chat history and routines are stored per user id in MongoDB.\n"
         "- Clearing the chat lives on the **Gym Buddy** page; routine deletion on the **Workouts** page.\n"
-        "- Signing out returns the session to the shared guest identity."
+        "- Signing out returns you to the welcome (sign-in) screen."
     )
     st.caption("Version 2.0 — development build")

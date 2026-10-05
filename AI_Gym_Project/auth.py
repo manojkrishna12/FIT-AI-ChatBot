@@ -11,9 +11,12 @@ Guest (no account) usage remains fully supported.
 from __future__ import annotations
 
 import re
+import secrets
+import time
 from datetime import datetime, timezone
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from constants import USER_ACCOUNTS_COLLECTION
 from storage import _get_collection, get_active_user_id
@@ -159,6 +162,85 @@ def sign_out() -> None:
 
 def is_authenticated() -> bool:
     return bool(st.session_state.get("authenticated", False))
+
+
+# ── Persistent browser session (reload rehydration) ─────────────────────
+# Same architecture as the Campus Lost & Found app: the browser keeps a
+# random session token in a cookie and the app re-signs-in the matching
+# account on load. Same `users` collection, same credentials — the token
+# is just an extra field, not a second auth system.
+
+SESSION_COOKIE = "fitai_session"
+_SESSION_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
+
+def _set_session_cookie(token: str) -> None:
+    js = (
+        f"<script>document.cookie='{SESSION_COOKIE}={token}; path=/; "
+        f"max-age={_SESSION_MAX_AGE}; SameSite=Lax';</script>"
+    )
+    # Only a component iframe actually executes scripts (st.markdown HTML is
+    # inert); the brief wait lets the cookie land before the caller reruns.
+    components.html(js, height=0)
+    time.sleep(0.5)
+
+
+def _clear_session_cookie() -> None:
+    js = f"<script>document.cookie='{SESSION_COOKIE}=; path=/; max-age=0; SameSite=Lax';</script>"
+    components.html(js, height=0)
+    time.sleep(0.5)
+
+
+def _read_session_cookie() -> str | None:
+    try:
+        return st.context.cookies.get(SESSION_COOKIE) or None
+    except Exception:
+        return None
+
+
+def start_session(username: str) -> None:
+    """Sign in and store a browser cookie so a page reload stays signed in."""
+    sign_in(username)
+    token = secrets.token_hex(32)
+    try:
+        _accounts_collection().update_one(
+            {"_id": normalize_username(username)}, {"$set": {"session_token": token}}
+        )
+    except Exception:
+        return  # in-memory sign-in still valid; a reload will just ask again
+    _set_session_cookie(token)
+
+
+def end_session() -> None:
+    """Sign out, revoke the stored session token and clear the cookie."""
+    username = current_username()
+    if username:
+        try:
+            _accounts_collection().update_one(
+                {"_id": username}, {"$unset": {"session_token": ""}}
+            )
+        except Exception:
+            pass
+    _clear_session_cookie()
+    sign_out()
+
+
+def restore_session() -> bool:
+    """Re-sign-in from the browser cookie after a reload. True when restored."""
+    if is_authenticated():
+        return True
+    token = _read_session_cookie()
+    if not token:
+        return False
+    try:
+        doc = _accounts_collection().find_one({"session_token": token}, {"_id": 1})
+    except Exception:
+        return False
+    if not doc:
+        _clear_session_cookie()  # stale or revoked token — drop the cookie
+        return False
+    sign_in(str(doc["_id"]))
+    return True
 
 
 def current_username() -> str | None:
