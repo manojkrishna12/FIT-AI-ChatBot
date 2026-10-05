@@ -83,8 +83,14 @@ html, body, .stApp, [class*="css"] {
 ::selection { background: var(--color-accent-soft); }
 
 /* ── 3. Streamlit chrome & layout ─────────────────────────────── */
-[data-testid="stHeader"], .stAppHeader, [data-testid="stToolbar"],
-[data-testid="stDecoration"], #MainMenu, footer { display: none !important; }
+/* Hide Streamlit's top chrome, but keep the header itself in the DOM:
+   when the sidebar is collapsed, Streamlit renders the expand-sidebar
+   control inside the header, so it must stay visible and clickable. */
+[data-testid="stHeader"], .stAppHeader { background: transparent; pointer-events: none; }
+[data-testid="stDecoration"], #MainMenu, footer,
+[data-testid="stMainMenu"], [data-testid="stAppDeployButton"],
+[data-testid="stStatusWidget"] { display: none !important; }
+[data-testid="stExpandSidebarButton"] { pointer-events: auto; }
 
 .block-container {
     padding-top: 1.6rem;
@@ -103,7 +109,7 @@ html, body, .stApp, [class*="css"] {
 section[data-testid="stSidebar"] {
     background: var(--color-bg);
     border-right: 1px solid var(--color-border);
-    width: 264px; min-width: 264px;
+    width: 264px; min-width: 0; /* min-width 0 so Streamlit's collapse animation can close the slot */
 }
 section[data-testid="stSidebar"] [data-testid="stSidebarContent"] { padding: 1.15rem 0.9rem 1.5rem; }
 
@@ -524,7 +530,7 @@ hr {
 
 /* ── 19. Responsive ───────────────────────────────────────────── */
 @media (max-width: 860px) {
-    section[data-testid="stSidebar"] { width: 240px; min-width: 240px; }
+    section[data-testid="stSidebar"] { width: 240px; min-width: 0; }
     .ex-detail-media { flex-direction: column; }
     .ex-detail-media img { width: 100%; height: auto; }
 }
