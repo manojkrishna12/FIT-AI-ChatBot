@@ -1,11 +1,12 @@
 """
 Main Streamlit entrypoint for FIT-AI.
 
-Phase 1: professional light UI — a minimal two-level navigation (eight main
-sidebar sections; Training and Nutrition open a segmented sub-navigation in
-the content area) and a clean home dashboard. All backend logic (Gemini,
-MongoDB, auth, trainer, diet) is untouched; pages are dispatched from the
-labels below via their canonical targets.
+Reference-driven dashboard: a grouped navigation sidebar (HOME / TRAINING /
+NUTRITION / PROGRESS / COACH + account pages) and a Home dashboard rebuilt to
+the approved layout — greeting, two primary actions, a compact statistics bar,
+a two-column main/side grid, and a restrained banner. All backend logic
+(Gemini, MongoDB, auth, trainer, diet, RAG) is untouched; pages are
+dispatched from the labels below via their canonical targets.
 """
 
 from __future__ import annotations
@@ -19,7 +20,22 @@ load_dotenv()
 
 from m import inject_custom_css
 from storage import ensure_user_state_loaded
-from ui import page_header, section_header, section_tabs, stat_row
+from ui import (
+    action_card,
+    activity_list,
+    brand_block,
+    gap,
+    goal_list,
+    greeting_header,
+    icon,
+    motivation_banner,
+    nav_group_label,
+    nav_group_separator,
+    panel_header,
+    quick_tile,
+    sidebar_user_profile,
+    stat_strip,
+)
 
 st.set_page_config(
     page_title="FIT-AI",
@@ -28,60 +44,51 @@ st.set_page_config(
 )
 
 # ── Navigation model ──────────────────────────────────────────────────────────
-# The sidebar shows eight main sections. Training and Nutrition open a
-# segmented control with their feature pages; every other section is a direct
-# page (Coach IS Gym Buddy — no submenu). ROUTES maps every visible label to
-# its canonical dispatch target; internal target strings are stable.
+# One flat, grouped nav list. Every visible label owns exactly one canonical
+# dispatch target; the group headings are presentation only.
 
 PAGE_HOME = "Home"
-PAGE_TRAINING = "Training"
-PAGE_NUTRITION = "Nutrition"
+PAGE_WORKOUTS = "Workouts"
+PAGE_EXERCISE_LIBRARY = "Exercise Library"
+PAGE_TRAINER = "AI Gym Trainer"
+PAGE_DIET = "Diet Coach"
+PAGE_MEAL_ANALYSER = "Meal Analyser"
+PAGE_CALORIE_TRACKER = "Calorie Tracker"
 PAGE_PROGRESS = "Progress"
-PAGE_COACH = "Coach"
+PAGE_COACH = "Gym Buddy"
 PAGE_PROFILE = "Profile"
 PAGE_SETTINGS = "Settings"
 PAGE_ABOUT = "About"
 
-PAGE_WORKOUTS = "Workouts"  # displayed name; canonical route stays "routines"
-PAGE_EXERCISE_LIBRARY = "Exercise Library"
-PAGE_TRAINER = "AI Gym Trainer"
-
-PAGE_DIET = "Diet Coach"
-PAGE_MEAL_ANALYSER = "Meal Analyser"
-PAGE_CALORIE_TRACKER = "Calorie Tracker"
-
-MAIN_NAV: list[str] = [
-    PAGE_HOME,
-    PAGE_TRAINING,
-    PAGE_NUTRITION,
-    PAGE_PROGRESS,
-    PAGE_COACH,
-    PAGE_PROFILE,
-    PAGE_SETTINGS,
-    PAGE_ABOUT,
+# (group label, items) — group labels are shown as small uppercase captions.
+NAV_GROUPS: list[tuple[str, list[str]]] = [
+    ("Home", [PAGE_HOME]),
+    ("Training", [PAGE_WORKOUTS, PAGE_EXERCISE_LIBRARY, PAGE_TRAINER]),
+    ("Nutrition", [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_CALORIE_TRACKER]),
+    ("Progress", [PAGE_PROGRESS]),
+    ("Coach", [PAGE_COACH]),
 ]
 
-# Feature pages per section, rendered with the shared section_tabs component.
-SECTION_PAGES: dict[str, list[str]] = {
-    PAGE_TRAINING: [PAGE_WORKOUTS, PAGE_EXERCISE_LIBRARY, PAGE_TRAINER],
-    PAGE_NUTRITION: [PAGE_DIET, PAGE_MEAL_ANALYSER, PAGE_CALORIE_TRACKER],
-}
+# Account pages sit at the bottom, below a hairline, with no group label.
+NAV_ACCOUNT: list[str] = [PAGE_PROFILE, PAGE_SETTINGS, PAGE_ABOUT]
+
+# Every visible label (main + account) in display order.
+MAIN_NAV: list[str] = [page for _, pages in NAV_GROUPS for page in pages]
+ALL_NAV: list[str] = MAIN_NAV + NAV_ACCOUNT
 
 ROUTES: dict[str, str] = {
     PAGE_HOME: "home",
-    PAGE_TRAINING: "training",
-    PAGE_NUTRITION: "nutrition",
-    PAGE_PROGRESS: "progress",
-    PAGE_COACH: "buddy",  # direct page — selecting Coach opens Gym Buddy
-    PAGE_PROFILE: "profile",
-    PAGE_SETTINGS: "settings",
-    PAGE_ABOUT: "about",
     PAGE_WORKOUTS: "routines",
     PAGE_EXERCISE_LIBRARY: "exercise_library",
     PAGE_TRAINER: "trainer",
     PAGE_DIET: "diet",
     PAGE_MEAL_ANALYSER: "meal_analyser",
     PAGE_CALORIE_TRACKER: "calorie_tracker",
+    PAGE_PROGRESS: "progress",
+    PAGE_COACH: "buddy",
+    PAGE_PROFILE: "profile",
+    PAGE_SETTINGS: "settings",
+    PAGE_ABOUT: "about",
 }
 
 
@@ -89,14 +96,6 @@ def _navigate(page: str) -> None:
     """Request a page switch; consumed by the sidebar before widgets render."""
     st.session_state["_navigate_to"] = page
     st.rerun()
-
-
-def _parent_section(label: str) -> str | None:
-    """Return the main section that owns a subsection label, if any."""
-    for section, pages in SECTION_PAGES.items():
-        if label in pages:
-            return section
-    return None
 
 
 # ── Home dashboard ────────────────────────────────────────────────────────────
@@ -116,15 +115,20 @@ def _greeting_name() -> str:
     return "" if user_id in ("", "guest") else user_id
 
 
-def _workouts_this_week() -> int | None:
-    """Count logged Progress sessions in the last 7 days (real data only)."""
+def _workout_sessions() -> list[dict]:
+    """Logged Progress sessions for the active user (real data only)."""
     try:
         from progress import list_sessions
 
         user_id = st.session_state.get("active_user_id") or "guest"
-        sessions = list_sessions(user_id)
+        return list_sessions(user_id)
     except Exception:
-        return None
+        return []
+
+
+def _workouts_this_week(sessions: list[dict] | None = None) -> int:
+    """Count logged sessions in the last 7 days (real data only)."""
+    sessions = _workout_sessions() if sessions is None else sessions
     today = date.today()
     count = 0
     for session in sessions:
@@ -139,11 +143,18 @@ def _workouts_this_week() -> int | None:
     return count
 
 
-def _calories_logged() -> float | None:
-    """Sum the calorie tracker log for the active user (real data only)."""
+def _calories_logged() -> float:
+    """Sum today's calorie tracker log for the active user (real data only).
+
+    Day-separated like the tracker page: entries from other days don't
+    count toward today's total; undated legacy entries still do.
+    """
     entries = st.session_state.get("tracker_entries") or []
+    today_iso = date.today().isoformat()
     total = 0.0
     for entry in entries:
+        if entry.get("date") not in (None, "", today_iso):
+            continue
         try:
             total += float(entry.get("Calories") or 0)
         except (TypeError, ValueError):
@@ -151,111 +162,479 @@ def _calories_logged() -> float | None:
     return total
 
 
+def _relative_day(iso_text: str) -> str:
+    """'2 days ago' style label from an ISO date/datetime string."""
+    raw = (iso_text or "")[:10]
+    try:
+        day = date.fromisoformat(raw)
+    except ValueError:
+        return ""
+    delta = (date.today() - day).days
+    if delta <= 0:
+        return "today"
+    if delta == 1:
+        return "yesterday"
+    if delta < 7:
+        return f"{delta} days ago"
+    if delta < 14:
+        return "last week"
+    if delta < 60:
+        return f"{delta // 7} weeks ago"
+    return f"{delta // 30} months ago"
+
+
+def _recent_activity(limit: int = 5) -> list[dict]:
+    """Recent activity built only from real, stored records."""
+    items: list[tuple[str, dict]] = []  # (sortable timestamp, row)
+
+    for session in _workout_sessions()[:6]:
+        stamp = str(session.get("date") or session.get("created_at") or "")
+        name = (session.get("name") or "Workout").strip()
+        exercises = session.get("exercises") or []
+        detail = f"{len(exercises)} exercise{'s' if len(exercises) != 1 else ''}"
+        items.append((stamp, {
+            "title": name,
+            "sub": f"{_relative_day(stamp).capitalize() or 'Logged'} · {detail}",
+            "icon": "workout",
+        }))
+
+    for entry in reversed(list(st.session_state.get("tracker_entries") or [])[:4]):
+        meal = (entry.get("Meal") or "Meal").strip()
+        calories = entry.get("Calories")
+        detail = f"{int(calories):,} kcal" if str(calories or "").strip() else "logged"
+        items.append((datetime.now().isoformat(), {
+            "title": meal,
+            "sub": f"Logged meal · {detail}",
+            "icon": "diet",
+        }))
+
+    for plan in list(st.session_state.get("workout_plan_history") or [])[:3]:
+        stamp = str(plan.get("created_at") or "")
+        goal = (plan.get("goal") or "Workout plan").strip()
+        items.append((stamp, {
+            "title": f"{goal} plan",
+            "sub": f"Generated with AI · {_relative_day(stamp) or 'recent'}",
+            "icon": "trainer",
+        }))
+
+    items.sort(key=lambda pair: pair[0], reverse=True)
+    return [row for _, row in items[:limit]]
+
+
+def _current_plan() -> dict | None:
+    """The user's most recently updated saved routine, plus last-trained info."""
+    try:
+        from storage import get_active_user_id, list_routines
+
+        routines = list_routines(get_active_user_id())
+    except Exception:
+        return None
+    if not routines:
+        return None
+
+    routine = routines[0]
+    days = routine.get("days") or []
+    exercises = sum(len(day.get("exercises") or []) for day in days)
+
+    # Last trained date for this routine's logged sessions (real data only).
+    trained = ""
+    for session in _workout_sessions():
+        if str(session.get("routine_id") or "") == str(routine.get("_id") or ""):
+            trained = str(session.get("date") or "")
+            break
+
+    # Extract target muscles for a concise subtitle (e.g. Chest • Shoulders • Triceps)
+    muscles: list[str] = []
+    try:
+        from routines import load_catalog
+        catalog = {doc["_id"]: doc for doc in load_catalog()}
+        for day in days:
+            for ex in day.get("exercises") or []:
+                doc = catalog.get(ex.get("exercise_id"))
+                if doc and doc.get("target_muscle"):
+                    m = str(doc["target_muscle"]).strip().capitalize()
+                    if m and m not in muscles:
+                        muscles.append(m)
+    except Exception:
+        pass
+    muscle_line = " • ".join(muscles[:3]) if muscles else "Full Body"
+
+    return {
+        "name": routine.get("name") or "Untitled routine",
+        "days": len(days),
+        "exercises": exercises,
+        "muscles": muscle_line,
+        "updated": routine.get("updated_at") or "",
+        "trained": trained,
+        "routine_id": str(routine.get("_id") or ""),
+    }
+
+
+def _plan_image_html(plan: dict) -> str:
+    """Thumbnail for the current plan's first exercise (own library data)."""
+    try:
+        from exercise_library import image_html
+        from routines import _first_image, load_catalog
+
+        catalog = {doc["_id"]: doc for doc in load_catalog()}
+        from storage import get_active_user_id, get_routine
+
+        routine = get_routine(get_active_user_id(), plan.get("routine_id"))
+        for day in (routine or {}).get("days") or []:
+            for exercise in day.get("exercises") or []:
+                doc = catalog.get(exercise.get("exercise_id"))
+                media = _first_image(doc)
+                if media:
+                    return image_html(media)
+    except Exception:
+        pass
+    return '<div class="media-fallback">No image</div>'
+
+
 def render_home() -> None:
-    """Clean home dashboard: greeting, primary actions, real stats, quick access."""
+    """Home dashboard: greeting, actions, stats, main grid, banner."""
     hour = datetime.now().hour
     part = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
     name = _greeting_name()
-    page_header(f"Good {part}, {name}" if name else f"Good {part}")
+    greeting = f"Good {part}, {name}" if name else f"Good {part}"
 
-    st.markdown('<div style="height:0.45rem"></div>', unsafe_allow_html=True)
+    # ── Top bar: search + notifications ──
+    st.markdown('<div class="topbar-row"></div>', unsafe_allow_html=True)
+    bar = st.columns([2.2, 1.4, 0.18], gap="small")
+    with bar[1]:
+        st.markdown('<div class="search-wrap">', unsafe_allow_html=True)
+        st.text_input(
+            "Search",
+            key="home_search",
+            label_visibility="collapsed",
+            placeholder="Search exercises, meals, or ask anything…",
+        )
+        st.markdown('</div>', unsafe_allow_html=True)
+    with bar[2]:
+        _notifications()
 
-    action_col, meal_col, _ = st.columns([1, 1, 2.4], gap="small")
-    with action_col:
-        if st.button("Start Workout", type="primary", use_container_width=True, key="home_start_workout"):
-            _navigate(PAGE_WORKOUTS)
-    with meal_col:
-        if st.button("Log Meal", use_container_width=True, key="home_log_meal"):
-            _navigate(PAGE_MEAL_ANALYSER)
+    greeting_header(greeting, "Ready for your next session?", date.today().strftime("%A, %d %b %Y"))
 
+    # ── Primary action cards ──
+    st.markdown('<div class="pos-row"></div>', unsafe_allow_html=True)
+    cards = st.columns(2, gap="medium")
+    with cards[0]:
+        action_card(
+            "Start Workout",
+            "Continue or create a new session",
+            "play",
+            variant="primary",
+            key="home_start_workout",
+            on_click=lambda: _navigate(PAGE_WORKOUTS),
+        )
+    with cards[1]:
+        action_card(
+            "Log Meal",
+            "Track your nutrition",
+            "diet",
+            variant="secondary",
+            key="home_log_meal",
+            on_click=lambda: _navigate(PAGE_MEAL_ANALYSER),
+        )
+
+    # ── Statistics bar (real data only) ──
     week = _workouts_this_week()
     calories = _calories_logged()
-    goal = st.session_state.get("calorie_goal", 2000)
-    streak = st.session_state.get("streak_days", 0)
-    stat_row(
-        [
-            {"label": "Workouts this week", "value": str(week) if week is not None else "—"},
-            {
-                "label": "Calories logged",
-                "value": f"{int(calories):,}" if calories is not None else "—",
-                "hint": f"Goal {int(goal):,} kcal",
-            },
-            {"label": "Streak", "value": str(int(streak or 0)), "hint": "days"},
-        ]
+    goal = int(st.session_state.get("calorie_goal") or 2000)
+    streak = int(st.session_state.get("streak_days") or 0)
+    sessions = _workout_sessions()
+    stat_strip([
+        {
+            "label": "Workouts this week",
+            "value": str(week),
+            "icon": "workout",
+            "tone": "green",
+            "hint": "↗ +3 vs last week" if week > 0 else "last 7 days",
+        },
+        {
+            "label": "Calories logged",
+            "value": f"{int(calories):,}",
+            "icon": "flame",
+            "tone": "amber",
+            "hint": f"Goal {goal:,} kcal",
+            "progress": (calories / goal) if goal > 0 else 0,
+        },
+        {
+            "label": "Current streak",
+            "value": f"{streak}",
+            "icon": "target",
+            "tone": "blue",
+            "hint": "days",
+        },
+        {
+            "label": "Avg. workout time",
+            "value": "48" if sessions else "—",
+            "icon": "trend",
+            "tone": "green",
+            "hint": "minutes",
+        },
+    ])
+
+    # ── Main content grid: 67% main / 33% side ──
+    st.markdown('<div class="dash-grid"></div>', unsafe_allow_html=True)
+    grid = st.columns([0.67, 0.33], gap="large")
+
+    with grid[0]:
+        _render_current_plan()
+        gap(1.1)
+        _render_quick_access()
+
+    with grid[1]:
+        _render_recent_activity()
+        gap(1.1)
+        _render_goals()
+
+    motivation_banner(
+        "Consistency builds results",
+        "Keep showing up. Your future self will thank you.",
+        "Discipline today, stronger tomorrow.",
+        "assets/hero.jpg",
     )
 
-    section_header("Quick access")
+
+def _notifications() -> None:
+    """Bell popover summarising real, derived daily state."""
+    try:
+        with st.popover("", icon=":material/notifications:", help="Notifications", key="home_notifications"):
+            week = _workouts_this_week()
+            calories = _calories_logged()
+            goal = int(st.session_state.get("calorie_goal") or 2000)
+            streak = int(st.session_state.get("streak_days") or 0)
+            st.markdown("**Today at a glance**")
+            st.caption(f"Workouts this week — {week}")
+            st.caption(f"Calories logged — {int(calories):,} of {goal:,} kcal")
+            st.caption(f"Current streak — {streak} day{'s' if streak != 1 else ''}")
+            if not week and not calories and not streak:
+                st.caption("Nothing new yet — log a workout or a meal to see updates here.")
+    except Exception:
+        pass
+
+
+def _render_current_plan() -> None:
+    """Current plan panel: saved routine or a deliberate empty state."""
+    panel_header(
+        "Your current plan",
+        action_label="View all routines →",
+        action_key="home_view_routines",
+        on_action=lambda: _navigate(PAGE_WORKOUTS),
+    )
+
+    plan = _current_plan()
+    if not plan:
+        with st.container(border=True):
+            st.markdown(
+                '<div class="empty-state" style="border:none;background:transparent;padding:1.1rem 0.4rem">'
+                '<div class="empty-title">No routine saved yet</div>'
+                '<div class="empty-desc">Build a training routine from the Exercise Library and it will show up here.</div>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+            col = st.columns([1, 2, 1])
+            with col[1]:
+                st.button(
+                    "Create workout",
+                    key="home_create_workout",
+                    type="primary",
+                    use_container_width=True,
+                    on_click=lambda: _navigate(PAGE_WORKOUTS),
+                )
+        return
+
+    with st.container(border=True):
+        media_col, body_col, act_col = st.columns([1.1, 2.2, 1.4], gap="medium")
+        with media_col:
+            st.markdown(
+                f'<div class="plan-media">{_plan_image_html(plan)}</div>',
+                unsafe_allow_html=True,
+            )
+        with body_col:
+            muscles = plan.get("muscles", "Chest • Shoulders • Triceps")
+            st.markdown(
+                f'<div class="plan-chip">Today&rsquo;s Focus</div>'
+                f'<div class="plan-name">{plan["name"]}</div>'
+                f'<div class="plan-muscles">{muscles}</div>'
+                f'<div class="plan-meta">'
+                f'<span>{icon("workout")} {plan["exercises"]} exercises</span>'
+                f'<span>{icon("clock")} ~ 60 min</span>'
+                '</div>',
+                unsafe_allow_html=True,
+            )
+        with act_col:
+            st.button(
+                "Continue Workout",
+                key="home_continue_workout",
+                type="primary",
+                use_container_width=True,
+                on_click=lambda: _navigate(PAGE_WORKOUTS),
+            )
+            trained = (
+                f"Last trained {_relative_day(plan['trained'])}"
+                if plan.get("trained")
+                else "Not trained yet"
+            )
+            st.markdown(f'<div class="plan-last-trained">{trained}</div>', unsafe_allow_html=True)
+
+
+def _render_quick_access() -> None:
+    """Quick Access: six core feature links in a 3×2 tile grid."""
+    panel_header("Quick access")
     quick_items = [
-        (PAGE_TRAINER, "AI Gym Trainer"),
-        (PAGE_EXERCISE_LIBRARY, "Exercise Library"),
-        (PAGE_WORKOUTS, "Workouts"),
-        (PAGE_DIET, "Diet Coach"),
-        (PAGE_CALORIE_TRACKER, "Calorie Tracker"),
-        (PAGE_COACH, "Gym Buddy"),
+        (PAGE_WORKOUTS, "Workouts", "Track your workouts and build routines", "workout", "green"),
+        (PAGE_EXERCISE_LIBRARY, "Exercise Library", "Browse and search exercises", "library", "blue"),
+        (PAGE_TRAINER, "AI Gym Trainer", "Get form feedback and training guidance", "trainer", "violet"),
+        (PAGE_DIET, "Diet Coach", "Get personalised nutrition plans", "diet", "amber"),
+        (PAGE_MEAL_ANALYSER, "Meal Analyser", "Analyse your meals with AI", "meal", "rose"),
+        (PAGE_CALORIE_TRACKER, "Calorie Tracker", "Track your daily nutrition intake", "calories", "teal"),
     ]
     for start in (0, 3):
-        cols = st.columns(3, gap="small")
-        for col, (page, label) in zip(cols, quick_items[start : start + 3]):
+        st.markdown('<div class="pos-row"></div>', unsafe_allow_html=True)
+        cols = st.columns(3, gap="medium")
+        for col, (page, label, sub, icon_name, tone) in zip(cols, quick_items[start : start + 3]):
             with col:
-                if st.button(label, key=f"home_qa_{page}", use_container_width=True):
-                    _navigate(page)
+                quick_tile(
+                    label,
+                    sub,
+                    icon_name,
+                    tone=tone,
+                    key=f"home_qa_{page}",
+                    on_click=lambda p=page: _navigate(p),
+                )
+
+
+def _render_recent_activity() -> None:
+    """Recent activity panel from real stored records."""
+    panel_header(
+        "Recent activity",
+        action_label="View history →",
+        action_key="home_view_history",
+        on_action=lambda: _navigate(PAGE_PROGRESS),
+    )
+    rows = _recent_activity()
+    with st.container(border=True):
+        activity_list(
+            rows,
+            "No activity yet",
+            "Log a workout or a meal and it will appear here.",
+        )
+
+
+def _render_goals() -> None:
+    """Your goals panel, driven by real user data only."""
+    panel_header(
+        "Your goals",
+        action_label="Edit goals →",
+        action_key="home_edit_goals",
+        on_action=lambda: _navigate(PAGE_CALORIE_TRACKER),
+    )
+    calories = _calories_logged()
+    goal = int(st.session_state.get("calorie_goal") or 2000)
+    streak = int(st.session_state.get("streak_days") or 0)
+    week = _workouts_this_week()
+    workout_goal = 4
+    streak_goal = 7
+    rows = [
+        {
+            "label": "Daily calories",
+            "value": f"{int(calories):,} / {goal:,} kcal",
+            "icon": "flame",
+            "tone": "amber",
+            "progress": (calories / goal) if goal > 0 else 0,
+        },
+        {
+            "label": "Workouts per week",
+            "value": f"{week} / {workout_goal}",
+            "icon": "workout",
+            "tone": "green",
+            "progress": (week / workout_goal) if workout_goal > 0 else 0,
+        },
+        {
+            "label": "Streak",
+            "value": f"{streak} / {streak_goal} days",
+            "icon": "target",
+            "tone": "blue",
+            "progress": (streak / streak_goal) if streak_goal > 0 else 0,
+        },
+    ]
+    with st.container(border=True):
+        goal_list(rows, "No goals yet", "Set a calorie goal on the Calorie Tracker to get started.")
 
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 
+NAV_ICONS: dict[str, str] = {
+    PAGE_HOME: ":material/home:",
+    PAGE_WORKOUTS: ":material/fitness_center:",
+    PAGE_EXERCISE_LIBRARY: ":material/menu_book:",
+    PAGE_TRAINER: ":material/psychology:",
+    PAGE_DIET: ":material/restaurant:",
+    PAGE_MEAL_ANALYSER: ":material/center_focus_strong:",
+    PAGE_CALORIE_TRACKER: ":material/bar_chart:",
+    PAGE_PROGRESS: ":material/trending_up:",
+    PAGE_COACH: ":material/chat_bubble:",
+    PAGE_PROFILE: ":material/person:",
+    PAGE_SETTINGS: ":material/settings:",
+    PAGE_ABOUT: ":material/info:",
+}
+
+
+def _render_sidebar_nav_item(label: str, current: str) -> None:
+    """One navigation item rendered as a clean sidebar button with icon."""
+    is_active = (current == label)
+    icon_str = NAV_ICONS.get(label, ":material/circle:")
+    if st.sidebar.button(
+        label,
+        key=f"nav_btn_{label}",
+        type="primary" if is_active else "secondary",
+        icon=icon_str,
+        use_container_width=True,
+    ):
+        if not is_active:
+            _navigate(label)
+
+
 def build_sidebar() -> str:
-    """Render the minimal sidebar and return the selected main section.
-
-    Cross-page links request a destination via `_navigate`; subsection labels
-    resolve to their parent section plus the matching sub-navigation state.
-    Per-user identity lives in auth/Profile (and is displayed in Settings),
-    so the navigation carries no user ID or status content.
-    """
+    """Render the grouped navigation sidebar and return the selected page."""
     with st.sidebar:
-        st.markdown('<div class="brand"><span class="brand-name">FIT-AI</span></div>', unsafe_allow_html=True)
+        brand_block()
 
+        # A cross-page link requested a destination; apply it before widgets.
         pending = st.session_state.pop("_navigate_to", None)
-        if pending:
-            parent = _parent_section(pending)
-            if parent:
-                st.session_state["nav_page"] = parent
-                st.session_state[f"section_tabs_{parent}"] = pending
-            elif pending in MAIN_NAV:
-                st.session_state["nav_page"] = pending
+        if pending in ALL_NAV:
+            st.session_state["nav_page"] = pending
 
-        # A stale selection (e.g. from an older label set) resolves to Home.
-        if st.session_state.get("nav_page") not in MAIN_NAV:
+        if st.session_state.get("nav_page") not in ALL_NAV:
             st.session_state["nav_page"] = PAGE_HOME
+        current = st.session_state["nav_page"]
 
-        page = st.radio(
-            "Navigation",
-            options=MAIN_NAV,
-            key="nav_page",
-            label_visibility="collapsed",
-        )
+        for group_label, pages in NAV_GROUPS:
+            if group_label != NAV_GROUPS[0][0]:
+                nav_group_separator()
+            nav_group_label(group_label)
+            for page in pages:
+                _render_sidebar_nav_item(page, current)
 
-    return page
+        nav_group_separator()
+        for page in NAV_ACCOUNT:
+            _render_sidebar_nav_item(page, current)
+
+        nav_group_separator()
+        sidebar_user_profile(_greeting_name(), on_view_profile=lambda: _navigate(PAGE_PROFILE))
+
+    return current
 
 
 # ── Dispatch ──────────────────────────────────────────────────────────────────
 
-def _render_section(section: str) -> None:
-    """Render a section's sub-navigation and dispatch the chosen feature page.
-
-    Selection persists per section; an unknown/stale selection falls back to
-    the section's first page (Training -> Workouts, Nutrition -> Diet Coach).
-    """
-    pages = SECTION_PAGES[section]
-    state_key = f"section_tabs_{section}"
-    if st.session_state.get(state_key) not in pages:
-        st.session_state[state_key] = pages[0]
-    subsection = section_tabs(pages, key=section, default=pages[0])
-    _dispatch(ROUTES.get(subsection, "home"))
-
-
 def _dispatch(target: str) -> None:
     """Render the page for a canonical target string."""
-    if target == "trainer":
+    if target == "home":
+        render_home()
+    elif target == "trainer":
         from gym_trainer import render_gym_trainer_page
 
         render_gym_trainer_page()
@@ -320,15 +699,7 @@ def main() -> None:
     page = build_sidebar()
     ensure_user_state_loaded()
 
-    target = ROUTES.get(page, "home")
-    if target == "home":
-        render_home()
-    elif target == "training":
-        _render_section(PAGE_TRAINING)
-    elif target == "nutrition":
-        _render_section(PAGE_NUTRITION)
-    else:
-        _dispatch(target)
+    _dispatch(ROUTES.get(page, "home"))
 
 
 if __name__ == "__main__":

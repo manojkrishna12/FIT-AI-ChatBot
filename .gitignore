@@ -1,4 +1,8 @@
 .env
+.env.bak*
+.env.pre-atlas-bak
+*.env.bak
+
 venv/
 venv2/
 .venv/
@@ -10,3 +14,26 @@ chat_history.json
 output images/
 
 *.log
+*.log.*
+dataset/
+
+# Local-only runtime artifacts (never distribute)
+.mongodb-data/
+.pytest_cache/
+.freebuff/
+
+# tools/: local installers, MongoDB binaries, machine-specific files
+tools/mongodb-bin/
+tools/*.zip
+tools/*.exe
+tools/*.lnk
+tools/env.bak*
+tools/env.local*
+tools/mongod_service.log*
+tools/mongod_restore.log
+tools/mongo_dl.log
+tools/shortcut_launch.log
+tools/streamlit_run*.log
+tools/pip_install.log
+tools/shortcut_args.txt
+tools/live_restart.log

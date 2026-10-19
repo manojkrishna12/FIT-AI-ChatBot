@@ -5,6 +5,7 @@ Shared utilities for the AI Gym app.
 from __future__ import annotations
 
 import os
+import time
 
 from google import genai
 import numpy as np
@@ -14,9 +15,10 @@ import streamlit as st
 from constants import (
     BMI_CATEGORIES,
     CALORIE_MULTIPLIERS,
-    GEMINI_API_KEY,
+    GEMINI_MAX_ATTEMPTS,
     GEMINI_MODEL,
     GEMINI_REQUEST_TIMEOUT_S,
+    GEMINI_RETRY_BASE_DELAY_S,
     NUTRITION_DATASET_PATH,
     WORKOUT_DATASET_PATH,
 )
@@ -37,8 +39,12 @@ from ui import (  # noqa: F401  (re-exports)
 
 @st.cache_resource(show_spinner=False)
 def _cached_gemini_client(api_key: str) -> genai.Client:
-    """Create and cache a Gemini Client instance."""
-    return genai.Client(api_key=api_key)
+    """Create and cache a Gemini Client instance (with a request timeout)."""
+    http_timeout_ms = GEMINI_REQUEST_TIMEOUT_S * 1000
+    return genai.Client(
+        api_key=api_key,
+        http_options={"timeout": http_timeout_ms},
+    )
 
 
 def initialize_gemini() -> genai.Client | None:
@@ -49,43 +55,111 @@ def initialize_gemini() -> genai.Client | None:
     return _cached_gemini_client(key)
 
 
-def get_gemini_response(prompt: str, client: genai.Client | None = None) -> str:
-    """Send a prompt to Gemini and return plain text, safely catching API errors."""
-    print("\n" + "="*50)
-    print("[Gemini] Request started")
-
+def _safe_cached_client(api_key: str) -> genai.Client:
+    """Return the cached client, or None when the resource cache is unavailable
+    (bare/test mode without Streamlit runtime)."""
     try:
-        api_key = os.environ.get("GEMINI_API_KEY", "").strip()
-        print(f"[Gemini] API key configured: {bool(api_key)}")
-        print(f"[Gemini] Model: {GEMINI_MODEL}")
-        
-        if not api_key:
-            print("[Gemini] Request failed")
-            return "Gemini API key is not configured. Add GEMINI_API_KEY to the .env file."
+        return _cached_gemini_client(api_key)
+    except Exception:
+        return None
 
-        if client is None:
-            client = genai.Client(api_key=api_key)
 
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=prompt,
-        )
+# Error categories returned by _classify_gemini_error. Callers (diet parsing,
+# chat UI) can sniff _TRANSIENT_MARKERS in the visible text to distinguish a
+# retryable outage from a configuration problem.
+_TRANSIENT_MARKERS = (
+    "temporarily unavailable",  # legacy message, may still be in saved state
+    "still busy after",
+)
+_CONFIG_MARKERS = (
+    "API key is not configured",
+    "Gemini API key",
+    "no content for this request",
+)
 
-        if not response or not response.text:
-            print("[Gemini] Request failed")
-            return "Gemini returned an empty response. Please try again."
 
-        print("[Gemini] Request successful")
-        print("="*50 + "\n")
-        return response.text.strip()
+def _classify_gemini_error(err: Exception) -> str:
+    """Map a Gemini SDK exception to a classification.
 
-    except Exception as e:
-        err_str = str(e).lower()
-        print(f"[Gemini] Request failed: {e}")
-        print("="*50 + "\n")
-        if "400" in err_str or "401" in err_str or "403" in err_str or "api key not valid" in err_str or "unauthenticated" in err_str or "invalid api key" in err_str or "projects/" in err_str:
-            return f"Error: The Gemini API key in your .env file is invalid. Make sure it starts with 'AIza' and is not a Project ID. Details: {e}"
-        return "Gemini is temporarily unavailable. Please try again in a moment."
+    Returns one of:
+      'auth'        — permanent key/permission problem, do not retry
+      'transient'   — network / 429 / 5xx / timeout, worth retrying
+      anything else — a ready-to-show user-facing message for a permanent
+                      misconfiguration (e.g. unknown model), not retried
+    """
+    status = getattr(err, "code", None)  # google.genai.errors.APIError carries .code
+    text = str(err).lower()
+
+    if status in (401, 403):
+        return "auth"
+    if status == 400 and "api key" in text:
+        return "auth"
+    if status == 400:
+        return ("The Gemini request was rejected (400). The configured model "
+                "name may not exist for this API key — check GEMINI_MODEL "
+                "in the .env file.")
+    if status == 404:
+        return "The configured Gemini model was not found (404). Check GEMINI_MODEL in the .env file."
+    if "api key" in text or "unauthenticated" in text or "permission denied" in text:
+        return "auth"
+    return "transient"
+
+
+def get_gemini_response(prompt: str, client: genai.Client | None = None) -> str:
+    """Send a prompt to Gemini and return plain text.
+
+    Transient failures (network, rate limits, 5xx) are retried with backoff;
+    permanent ones (bad key, unknown model) fail fast. User-facing messages
+    explain what went wrong and what to do; internal/API details stay in the
+    server log and are never echoed to the UI.
+    """
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        return "Gemini API key is not configured. Add GEMINI_API_KEY to the .env file."
+
+    if client is None:
+        client = _safe_cached_client(api_key)
+    if client is None:
+        client = genai.Client(api_key=api_key, http_options={"timeout": GEMINI_REQUEST_TIMEOUT_S * 1000})
+
+    attempts = GEMINI_MAX_ATTEMPTS
+    last_detail = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            start = time.monotonic()
+            response = client.models.generate_content(
+                model=GEMINI_MODEL,
+                contents=prompt,
+            )
+            elapsed = time.monotonic() - start
+            if not response or not response.text:
+                # An empty completion usually means the prompt was blocked;
+                # retrying rarely changes that, so surface the expected state.
+                print("[Gemini] Empty response (possibly content-blocked)")
+                return "The model returned no content for this request — try rephrasing."
+            print(f"[Gemini] OK in {elapsed:.1f}s (attempt {attempt})")
+            return response.text.strip()
+        except Exception as e:
+            last_detail = str(e)
+            print(f"[Gemini] Attempt {attempt}/{attempts} failed: {type(e).__name__}: {last_detail[:200]}")
+            category = _classify_gemini_error(e)
+            if category == "auth":
+                print("[Gemini] Auth/config error — not retrying")
+                return (
+                    "The Gemini API rejected the request. The configured API key "
+                    "may be invalid or lacks access. Update GEMINI_API_KEY (or "
+                    "GEMINI_MODEL) in the .env file and restart."
+                )
+            if category != "transient":
+                # A ready-made message for a permanent misconfiguration.
+                return category
+            if attempt < attempts:
+                time.sleep(GEMINI_RETRY_BASE_DELAY_S * attempt)
+
+    return (
+        f"Gemini is still busy after {attempts} attempts. Please try again "
+        "in a moment. (Transient service/network error — no details exposed.)"
+    )
 
 # ── BMI / TDEE helpers ─────────────────────────────────────────────────────────
 
@@ -206,7 +280,6 @@ def show_metrics_row(metrics: dict) -> None:
 _STYLES_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "styles.css")
 
 
-@st.cache_data(show_spinner=False)
 def _load_stylesheet() -> str:
     """Load the FitAI design system stylesheet from assets/styles.css."""
     with open(_STYLES_PATH, encoding="utf-8") as fh:

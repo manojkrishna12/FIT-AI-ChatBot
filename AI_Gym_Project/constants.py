@@ -16,6 +16,8 @@ load_dotenv()
 GEMINI_API_KEY  = os.getenv("GEMINI_API_KEY", "YOUR_GEMINI_API_KEY_HERE")
 GEMINI_MODEL    = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_REQUEST_TIMEOUT_S = int(os.getenv("GEMINI_REQUEST_TIMEOUT_S", "20"))
+GEMINI_MAX_ATTEMPTS = int(os.getenv("GEMINI_MAX_ATTEMPTS", "3"))
+GEMINI_RETRY_BASE_DELAY_S = float(os.getenv("GEMINI_RETRY_BASE_DELAY_S", "1.5"))
 CHAT_CONTEXT_TURNS = int(os.getenv("CHAT_CONTEXT_TURNS", "8"))
 
 # Per-user app profile used when no identifier is provided in the sidebar.

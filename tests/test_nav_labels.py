@@ -1,56 +1,48 @@
-"""Navigation model tests: main sections, subsections, and route coverage."""
+"""Navigation model tests: grouped sidebar labels and route coverage."""
 from __future__ import annotations
 
 import app  # noqa: E402  (path configured in conftest)
 import diet  # noqa: E402
 
 
-def test_main_navigation_labels():
-    """The sidebar shows exactly the eight approved main sections."""
-    assert app.MAIN_NAV == [
+def _visible_labels() -> list[str]:
+    """Every navigation label a user can see, in display order."""
+    labels = [page for _, pages in app.NAV_GROUPS for page in pages]
+    return labels + list(app.NAV_ACCOUNT)
+
+
+def test_navigation_groups():
+    """The sidebar renders the approved groups in order."""
+    assert [group for group, _ in app.NAV_GROUPS] == [
         "Home",
         "Training",
         "Nutrition",
         "Progress",
         "Coach",
-        "Profile",
-        "Settings",
-        "About",
     ]
-    assert len(set(app.MAIN_NAV)) == len(app.MAIN_NAV), "duplicate main labels"
+    assert app.NAV_ACCOUNT == ["Profile", "Settings", "About"]
 
 
-def test_training_subsection_labels():
-    assert app.SECTION_PAGES["Training"] == ["Workouts", "Exercise Library", "AI Gym Trainer"]
+def test_training_group_items():
+    assert app.NAV_GROUPS[1] == (
+        "Training",
+        ["Workouts", "Exercise Library", "AI Gym Trainer"],
+    )
 
 
-def test_nutrition_subsection_labels():
+def test_nutrition_group_items():
     """Nutrition is Diet Coach, Meal Analyser and Calorie Tracker only."""
-    assert app.SECTION_PAGES["Nutrition"] == [
-        "Diet Coach",
-        "Meal Analyser",
-        "Calorie Tracker",
-    ]
+    assert app.NAV_GROUPS[2] == (
+        "Nutrition",
+        ["Diet Coach", "Meal Analyser", "Calorie Tracker"],
+    )
     assert "Grocery List" not in app.ROUTES
 
 
-def test_every_label_routes():
-    """Every visible label (main + subsection) owns exactly one route."""
-    labels = [*app.MAIN_NAV, *(p for pages in app.SECTION_PAGES.values() for p in pages)]
-    assert set(labels) == set(app.ROUTES.keys()), "labels and ROUTES diverged"
-    assert len(app.ROUTES) == len(labels), "duplicate route ownership"
-
-
-def test_canonical_targets_unique():
-    """No two labels dispatch to the same canonical target."""
-    values = list(app.ROUTES.values())
-    assert len(set(values)) == len(values), "a canonical target is owned by two labels"
-
-
 def test_coach_opens_gym_buddy_directly():
-    """Coach is a direct main page — no submenu, no second click."""
-    assert app.ROUTES["Coach"] == "buddy"
-    assert "Coach" not in app.SECTION_PAGES
+    """Coach group holds Gym Buddy as a direct page — no submenu, no second click."""
+    assert app.NAV_GROUPS[-1] == ("Coach", ["Gym Buddy"])
+    assert app.ROUTES["Gym Buddy"] == "buddy"
     from habit_tracker import render_gym_buddy_page
 
     assert callable(render_gym_buddy_page)
@@ -63,6 +55,20 @@ def test_workouts_uses_existing_routines_implementation():
 
     assert callable(render_routines_page)
     assert "Routines" not in app.ROUTES, "old display name still routed"
+
+
+def test_every_label_routes():
+    """Every visible label owns exactly one route."""
+    labels = _visible_labels()
+    assert set(labels) == set(app.ROUTES.keys()), "labels and ROUTES diverged"
+    assert len(app.ROUTES) == len(labels), "duplicate route ownership"
+    assert len(set(labels)) == len(labels), "duplicate labels"
+
+
+def test_canonical_targets_unique():
+    """No two labels dispatch to the same canonical target."""
+    values = list(app.ROUTES.values())
+    assert len(set(values)) == len(values), "a canonical target is owned by two labels"
 
 
 def test_all_destination_pages_importable():

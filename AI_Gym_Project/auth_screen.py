@@ -13,18 +13,19 @@ from __future__ import annotations
 import streamlit as st
 
 from auth import authenticate, normalize_username, register_user, start_session
-from ui import page_header
+from ui import brand_block, page_header
 
 
 def render_auth_screen() -> None:
     """Full-page Sign in / Create account gate; reruns into Home on success."""
     # The gate has no sidebar — hide Streamlit's empty one for this run only.
     st.markdown(
-        "<style>section[data-testid='stSidebar']{display:none!important}</style>",
+        "<style>section[data-testid='stSidebar']{display:none!important}"
+        ".block-container{max-width:520px;margin:0 auto;padding-top:4.5rem}</style>",
         unsafe_allow_html=True,
     )
 
-    st.markdown('<div class="brand"><span class="brand-name">FIT-AI</span></div>', unsafe_allow_html=True)
+    brand_block()
     page_header(
         "Welcome to FIT-AI",
         "Sign in to your account — or create one — to open your dashboard.",
@@ -36,7 +37,12 @@ def render_auth_screen() -> None:
         with st.form("login_form", clear_on_submit=False):
             username = st.text_input("Username", key="login_user")
             password = st.text_input("Password", type="password", key="login_pass")
-            submitted = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+            st.markdown('<div style="height:0.4rem"></div>', unsafe_allow_html=True)
+            submitted = st.form_submit_button(
+                "Sign in",
+                type="primary",
+                use_container_width=True,
+            )
         if submitted:
             ok, message = authenticate(username, password)
             if ok:
@@ -52,7 +58,12 @@ def render_auth_screen() -> None:
             display = st.text_input("Display name (optional)", key="reg_display")
             new_pass = st.text_input("Password (min 8 characters)", type="password", key="reg_pass")
             new_pass2 = st.text_input("Confirm password", type="password", key="reg_pass2")
-            submitted = st.form_submit_button("Create account", type="primary", use_container_width=True)
+            st.markdown('<div style="height:0.4rem"></div>', unsafe_allow_html=True)
+            submitted = st.form_submit_button(
+                "Create account",
+                type="primary",
+                use_container_width=True,
+            )
         if submitted:
             if new_pass != new_pass2:
                 st.error("Passwords do not match.")
