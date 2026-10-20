@@ -88,6 +88,7 @@ _ICONS: dict[str, str] = {
     "play": '<path d="M8 5.5 18.5 12 8 18.5z"/>',
     "arrow-right": '<path d="M5 12h14M13 6l6 6-6 6"/>',
     "chevron-right": '<path d="M9.5 5.5 16 12l-6.5 6.5"/>',
+    "chevron-down": '<path d="M6 9.5l6 6 6-6"/>',
     "calendar": (
         '<rect x="5" y="6.5" width="14" height="14" rx="1.8"/>'
         '<path d="M5 10.5h14M9 3v4M15 3v4"/>'
@@ -105,6 +106,7 @@ _ICONS: dict[str, str] = {
         '<circle cx="12" cy="12" r="1.4"/>'
     ),
     "check": '<path d="M5 12.5 10 17.5 19 7"/>',
+    "circle": '<circle cx="12" cy="12" r="8.2"/><circle cx="12" cy="12" r="3.2"/>',
     "bell": (
         '<path d="M18 15.5V10a6 6 0 1 0-12 0v5.5L4.5 18.5h15z"/>'
         '<path d="M9.6 18.5a2.6 2.6 0 0 0 4.8 0"/>'
@@ -364,7 +366,7 @@ def panel_header(title: str, subtitle: str | None = None,
                  action_label: str | None = None, action_key: str | None = None,
                  on_action: callable | None = None) -> None:
     """Panel heading with optional supporting line and right-aligned action."""
-    head = st.columns([3, 1.15], gap="small")
+    head = st.columns([2.7, 1.5], gap="small")
     with head[0]:
         sub_html = f'<div class="panel-sub">{subtitle}</div>' if subtitle else ""
         st.markdown(f'<div><div class="panel-title">{title}</div>{sub_html}</div>', unsafe_allow_html=True)
@@ -436,6 +438,81 @@ def goal_list(rows: list[dict], empty_title: str, empty_desc: str) -> None:
             f"{bar}{hint_html}</div>"
         )
     st.markdown(f'<div class="goal-list">{"".join(cells)}</div>', unsafe_allow_html=True)
+
+
+def home_hero(greeting: str, subline: str, quote: str, image_path: str = "assets/hero.jpg") -> None:
+    """Premium welcome hero for Home: soft green gradient card, photo on the
+    right with a fade, quote chip. Action buttons are rendered separately
+    directly below inside the same visual card."""
+    import base64
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parent / image_path
+    try:
+        encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+        photo = f'<img src="data:image/jpeg;base64,{encoded}" alt="" class="home-hero-photo"/>'
+    except OSError:
+        photo = ""
+    st.markdown(
+        '<div class="home-hero">'
+        '<div class="home-hero-eyebrow">Welcome back</div>'
+        f'<div class="home-hero-title">{greeting}</div>'
+        f'<div class="home-hero-sub">{subline}</div>'
+        f'{photo}'
+        f'<div class="home-hero-quote">&ldquo;{quote}&rdquo;</div>'
+        '</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def home_today(date_label: str, rows: list[dict]) -> None:
+    """Today checklist card: date header plus real status rows.
+
+    rows: {label, done, hint?} — done states come from stored data only.
+    """
+    cells = []
+    for row in rows:
+        done = bool(row.get("done"))
+        state_cls = "home-today-ico--done" if done else "home-today-ico--todo"
+        hint = f'<span class="home-today-hint">{row["hint"]}</span>' if row.get("hint") else ""
+        cells.append(
+            '<div class="home-today-row">'
+            f'<div class="home-today-ico {state_cls}">{icon("check" if done else "circle")}</div>'
+            f'<div class="home-today-label">{row.get("label", "")}</div>'
+            f'{hint}</div>'
+        )
+    st.markdown(
+        '<div class="home-today">'
+        f'<div class="home-today-head">{icon("calendar")}<span class="home-today-title">Today</span>'
+        f'<span class="home-today-date">{date_label}</span></div>'
+        f'{"".join(cells)}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def feature_tile(
+    title: str,
+    subtitle: str,
+    icon_name: str,
+    *,
+    tone: str = "green",
+    key: str,
+    on_click: callable,
+    meta: str = "",
+) -> None:
+    """One journey/nutrition shortcut tile (fully clickable, optional meta)."""
+    meta_html = f'<div class="feature-meta">{meta}</div>' if meta else ""
+    st.markdown(
+        f'<div class="feature-tile-wrapper">'
+        f'<div class="feature-tile feature-tile--{tone}">'
+        f'<div class="feature-ico feature-ico--{tone}">{icon(icon_name)}</div>'
+        f'<div class="feature-body"><div class="feature-title">{title}</div>'
+        f'<div class="feature-sub">{subtitle}</div>{meta_html}</div>'
+        f'<div class="feature-arrow">{icon("chevron-right")}</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.button(title, key=key, on_click=on_click)
 
 
 def motivation_banner(title: str, subtitle: str, quote: str, image_path: str = "assets/hero.jpg") -> None:

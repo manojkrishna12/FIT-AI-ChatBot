@@ -4,41 +4,27 @@ title FIT-AI Stop
 
 rem ============================================================
 rem  FIT-AI stop script
-rem  - Stops ONLY this project's Streamlit process (port 8631)
-rem  - Never touches MongoDB
-rem  - Never touches unrelated Python or Streamlit processes
+rem  - Stops ONLY this project's Streamlit process(es) on 8631
+rem    (works for both `streamlit run app.py` and the
+rem     tools\run_fitai.py wrapper launch)
+rem  - Never touches MongoDB or unrelated processes
 rem ============================================================
 
 set "PS=powershell -NoProfile -ExecutionPolicy Bypass"
 
-rem ---- 1) Find the process listening on port 8631 ----
-set "FITAI_PID="
-for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8631 " ^| findstr "LISTENING"') do set "FITAI_PID=%%P"
+%PS% -Command ^
+ "$conn = Get-NetTCPConnection -LocalPort 8631 -State Listen -ErrorAction SilentlyContinue;" ^
+ "if(-not $conn){ Write-Output 'FIT-AI is not running - nothing to stop.'; exit 0 }" ^
+ "$pids = $conn | Select-Object -ExpandProperty OwningProcess -Unique;" ^
+ "$killed = 0; $foreign = 0;" ^
+ "foreach($procId in $pids){" ^
+ "  $p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $procId) -ErrorAction SilentlyContinue;" ^
+ "  if($p -and $p.CommandLine -match 'streamlit|run_fitai' -and $p.CommandLine -match 'app\.py|run_fitai\.py' -and $p.CommandLine -match 'Fit_AI_Version_2\.0|\.venv|8631'){" ^
+ "    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue; $killed++" ^
+ "  } else { $foreign++ }" ^
+ "};" ^
+ "if($killed -gt 0){ Write-Output ('FIT-AI has been stopped (' + $killed + ' process(es) stopped). MongoDB and everything else were left running.') }" ^
+ "elseif($foreign -gt 0){ Write-Output '[X] Port 8631 is used by an unrecognized process - nothing was stopped. Close it manually if you are sure.'; exit 1 }"
 
-if not defined FITAI_PID (
-    echo FIT-AI is not running - nothing to stop.
-    timeout /t 3 /nobreak >nul 2>&1
-    exit /b 0
-)
-
-rem ---- 2) Verify it really is this project's Streamlit app ----
-%PS% -Command "$p = Get-CimInstance Win32_Process -Filter 'ProcessId=%FITAI_PID%' -ErrorAction SilentlyContinue; if($p -and $p.CommandLine -match 'streamlit' -and $p.CommandLine -match 'app\.py' -and $p.CommandLine -match 'Fit_AI_Version_2\.0|\.venv|8631'){ exit 0 }; exit 1"
-if errorlevel 1 (
-    echo [X] PID %FITAI_PID% is using port 8631, but it does not look like this project's Streamlit app.
-    echo     Nothing was stopped. Close it manually if you are sure.
-    pause
-    exit /b 1
-)
-
-rem ---- 3) Stop it ----
-echo Stopping FIT-AI ^(PID %FITAI_PID%^) ...
-taskkill /PID %FITAI_PID% /F >nul 2>&1
-if errorlevel 1 (
-    echo [X] Could not stop PID %FITAI_PID% - it may have already exited.
-    timeout /t 3 /nobreak >nul 2>&1
-    exit /b 1
-)
-
-echo FIT-AI has been stopped. MongoDB and everything else were left running.
-timeout /t 3 /nobreak >nul 2>&1
-exit /b 0
+timeout /t 2 /nobreak >nul 2>&1
+exit /b %ERRORLEVEL%

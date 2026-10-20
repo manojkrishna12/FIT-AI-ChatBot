@@ -1,115 +1,132 @@
-# 💪 FIT-AI — AI Fitness Platform
+# 💪 FIT-AI v2.0 — AI Fitness Assistant
 
-An AI-powered fitness platform built with Python and Streamlit: real-time
+An AI-powered fitness assistant built with Python and Streamlit: real-time
 exercise coaching with MediaPipe pose analysis, an AI nutritionist powered by
-Google Gemini, and a companion that keeps you consistent.
+Google Gemini, a searchable exercise library, and per-user progress tracking
+in MongoDB.
+
+> **Version 2.0 stable** — tagged [`v2.0.1-stable`](../../releases). See
+> [Tags](../../tags) for the full history (`v2.0-stable-checkpoint`,
+> `fit-ai-rag-complete-2026-10-02`, …).
 
 ## ✨ Features
 
 **Training**
-- 🏋️ AI Gym Trainer — image/video pose analysis, live webcam rep counting and form feedback (MediaPipe BlazePose, 7 exercises)
-- 📚 Exercise Library — 379 curated exercises with reference images, muscles and equipment (licensed data, see below)
-- 🗓️ Routines — build multi-day workout routines from the library
+- 🏋️ **AI Gym Trainer** — image/video pose analysis and live webcam rep
+  counting with form feedback (MediaPipe BlazePose).
+- 📚 **Exercise Library** — 410 curated exercises (RepDB free-tier data) with
+  search, filters, images, muscles and equipment. Semantic (RAG) search built
+  on Gemini embeddings.
+- 🗓️ **Workouts & Routines** — build multi-day routines from the library,
+  log sessions with set/weight tracking.
 
 **Nutrition**
-- 🥗 Diet Coach — BMI/TDEE targets and personalized 7-day meal plans (validated JSON + deterministic fallback)
-- 🍽️ Meal Analyser — instant nutritional breakdown of any meal
-- 🛒 Grocery List — weekly shopping list from your meal plan
-- 📈 Calorie Tracker — log meals and track daily calories and macros
+- 🥗 **Diet Coach** — BMI/TDEE targets from your profile and personalised
+  7-day meal plans (validated JSON + deterministic fallback).
+- 🍽️ **Meal Analyser** — instant nutritional breakdown of any meal.
+- 📊 **Calorie Tracker** — read-only daily dashboard: goal (profile-based),
+  consumed, remaining, progress bar, and today's log shared with the Meal
+  Analyser.
 
 **Coach, Progress & Accounts**
-- 🤝 Gym Buddy (FitBot) — conversational AI coach with sentiment awareness, streak check-ins and daily challenges
-- 📊 Progress — log workout sessions (from routines or custom) with streak and volume trends
-- 👤 Accounts & Profile — password sign-up/sign-in (bcrypt-hashed), fitness profile that prefills AI forms
-- 🗄️ MongoDB persistence — per-user saved plans, chat, routines and sessions
+- 🤝 **Gym Buddy** — conversational AI coach with streak check-ins and daily
+  challenges.
+- 📈 **Progress** — workout sessions with streak and volume trends.
+- 👤 **Accounts & Profile** — password sign-up/sign-in (bcrypt-hashed),
+  per-user state in MongoDB Atlas or a local MongoDB.
 
 ## 🛠️ Tech Stack
 
-Python 3.12 · Streamlit · Google Gemini (`google-genai`) · MediaPipe BlazePose ·
-OpenCV · streamlit-webrtc · MongoDB (PyMongo + GridFS) · Pandas · bcrypt
+Python 3.12 · Streamlit · Google Gemini (`google-genai`) · MediaPipe
+BlazePose · OpenCV · streamlit-webrtc · MongoDB (PyMongo + GridFS) · Pandas ·
+bcrypt · pytest
 
-## 🚀 Run Locally
+## 📋 Prerequisites
 
-```bash
+- **Python 3.12** (a 3.12+ virtual environment is expected at `.venv\`)
+- **MongoDB Atlas** free cluster **or** a local MongoDB instance
+- **Google Gemini API key** (free tier works)
+
+## ⚙️ Setup
+
+```bat
 git clone https://github.com/manojkrishna12/FIT-AI-ChatBot.git
 cd FIT-AI-ChatBot
-
 python -m venv .venv
-.venv\Scripts\activate            # Windows  (macOS/Linux: source .venv/bin/activate)
-pip install -r AI_Gym_Project/requirements.txt
-
-copy AI_Gym_Project\.env.example AI_Gym_Project\.env   # then add your GEMINI_API_KEY
+.venv\Scripts\pip install -r AI_Gym_Project\requirements.txt
+copy .env.example AI_Gym_Project\.env   :: then fill in your keys
 ```
 
-Start MongoDB (local or Atlas) and set `MONGODB_URI` in `.env` if it is not the
-default `mongodb://127.0.0.1:27017`. Then:
+### `.env` configuration
 
-```bash
-cd AI_Gym_Project
-..\.venv\Scripts\python -m streamlit run app.py
+Copy `.env.example` (repo root or `AI_Gym_Project/`) and fill in:
+
+| Key | Purpose |
+| --- | --- |
+| `GEMINI_API_KEY` | Google Gemini API key (required) |
+| `MONGODB_URI` | Atlas SRV URI or `mongodb://127.0.0.1:27017` |
+| `MONGODB_DB_NAME` | Database name (default `ai_gym_assistant`) |
+
+**Never commit your real `.env`.** It is git-ignored.
+
+## 🚀 Start / Stop
+
+Double-click (or run from any directory):
+
+```bat
+START_FIT_AI.bat   :: DB check → starts Streamlit on port 8631 → opens browser
+STOP_FIT_AI.bat    :: stops only this project's server, leaves MongoDB running
 ```
 
-Open http://localhost:8501.
+What `START_FIT_AI.bat` does:
 
-### Optional: seed the Exercise Library
+1. **Database check** — pings MongoDB. If Atlas blocks the current public IP
+   (common with home connections), `tools/fix_db_access.py` prints the exact
+   IP to add in Atlas *Network Access* — or adds it automatically when Atlas
+   API keys are configured in `.env` (`ATLAS_PUBLIC_KEY`, `ATLAS_PRIVATE_KEY`,
+   `ATLAS_GROUP_ID`). It never uses `0.0.0.0/0`.
+2. **Starts the app** from this project's `.venv` via
+   `tools/run_fitai.py` (selector event-loop fix for Windows) on
+   <http://localhost:8631>, then opens your browser.
 
-The Exercise Library is backed by the [RepDB free-tier dataset](https://github.com/RepDB/exercise-dataset).
-Per its license the data is **not committed** to this repository — download it
-once and seed it into MongoDB:
+Manual start, if you prefer:
 
-```bash
-python scripts/seed_exercises.py --source <path-to-exercise-dataset-main>
+```bat
+.venv\Scripts\python tools\run_fitai.py
 ```
 
-**Exercise data by RepDB (repdb.co)** — see [docs/LICENSES.md](docs/LICENSES.md)
-for the full license text and compliance notes.
+## 🧪 Tests
 
-## 🧪 Tests & CI
-
-```bash
-pip install pytest
-python -m pytest tests/ -q
+```bat
+.venv\Scripts\python -m pytest tests\ -q
 ```
 
-GitHub Actions runs the suite on every push/PR (`.github/workflows/ci.yml`).
+145 tests cover diet targets, meal analysis normalization, the calorie
+tracker's shared-log logic, RAG grounding, storage fallbacks, and navigation
+labels. MongoDB and the Gemini API are mocked — no keys needed.
 
-## 🐳 Docker
+## 🔧 Troubleshooting
 
-```bash
-docker build -t fit-ai .
-docker run -p 8501:8501 --env-file AI_Gym_Project/.env fit-ai
+| Symptom | Fix |
+| --- | --- |
+| "Database unavailable — cannot sign in right now." | Your public IP changed (dynamic ISP). Run `START_FIT_AI.bat` and follow the printed Atlas step, or configure the Atlas API keys for the automatic fix. |
+| Port 8631 already in use | Run `STOP_FIT_AI.bat`, then start again. |
+| App starts but pages fail | Check `tools/live_restart.log` / console output; verify `.env` keys. |
+| Exercise Library is empty | Seed the catalog: see `scripts/seed_exercises.py --help`. |
+| Launcher says "does not look like this project's app" | Another program owns port 8631 — close it or change the port in `START_FIT_AI.bat` / `tools/run_fitai.py`. |
+
+## 📁 Project Layout
+
+```
+AI_Gym_Project/     Streamlit app (pages, UI kit, storage, RAG)
+tests/              pytest suite (145 tests)
+scripts/            seed_exercises.py, build_embeddings.py
+tools/              launcher scripts + DB access fixer (binaries git-ignored)
+docs/               architecture and data notes
 ```
 
-## 📁 Project Structure
+## 📄 Licenses & Attribution
 
-```
-AI_Gym_Project/
-├── app.py                 # entry point: router + Home page + sidebar nav
-├── m.py                   # shared utilities (Gemini, BMI/TDEE, CV helpers, CSS loader)
-├── assets/styles.css      # FitAI design system
-├── gym_trainer.py         # AI Gym Trainer (image, video, webcam, planner, database)
-├── exercise_library.py    # Exercise Library (MongoDB-backed catalog)
-├── routines.py            # Routines builder
-├── diet.py                # Diet Coach logic + standalone nutrition pages
-├── nutrition.py           # re-export surface for the nutrition pages
-├── habit_tracker.py       # Gym Buddy (FitBot)
-├── progress.py            # workout session logging + trends
-├── auth.py                # accounts + fitness profiles
-├── profile_page.py        # Profile page
-├── settings_page.py       # Settings page
-├── about.py               # About page (data attribution)
-├── storage.py             # MongoDB access (user state + collections)
-├── constants.py           # configuration
-└── requirements.txt       # pinned dependencies
-
-scripts/seed_exercises.py  # RepDB → MongoDB seeding pipeline
-tests/                     # pytest suite
-docs/                      # baseline report + data licenses
-```
-
-## 📄 License
-
-This project is for educational purposes as part of an academic major project.
-Exercise data is licensed separately by RepDB — see docs/LICENSES.md.
-
-*Built with ❤️ using Streamlit · MediaPipe · Gemini AI*
+- Exercise data: [RepDB](https://github.com/RepDB/exercise-dataset) free tier
+  — attribution shown in-app (About page); dataset files are not committed.
+- Application code: see repository settings.

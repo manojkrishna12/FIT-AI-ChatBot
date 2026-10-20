@@ -21,18 +21,17 @@ load_dotenv()
 from m import inject_custom_css
 from storage import ensure_user_state_loaded
 from ui import (
-    action_card,
     activity_list,
     brand_block,
+    feature_tile,
     gap,
     goal_list,
-    greeting_header,
+    home_hero,
+    home_today,
     icon,
-    motivation_banner,
     nav_group_label,
     nav_group_separator,
     panel_header,
-    quick_tile,
     sidebar_user_profile,
     stat_strip,
 )
@@ -141,6 +140,74 @@ def _workouts_this_week(sessions: list[dict] | None = None) -> int:
         if 0 <= delta <= 6:
             count += 1
     return count
+
+
+def _workouts_last_week(sessions: list[dict] | None = None) -> int:
+    """Count logged sessions in the previous 7-day window (days 7–13 ago)."""
+    sessions = _workout_sessions() if sessions is None else sessions
+    today = date.today()
+    count = 0
+    for session in sessions:
+        raw = str(session.get("date") or "")[:10]
+        try:
+            day = date.fromisoformat(raw)
+        except ValueError:
+            continue
+        delta = (today - day).days
+        if 7 <= delta <= 13:
+            count += 1
+    return count
+
+
+def _workout_delta_hint(this_week: int, last_week: int) -> str:
+    """Honest week-over-week wording — no invented numbers."""
+    if this_week == 0 and last_week == 0:
+        return "last 7 days"
+    if last_week == 0:
+        return f"↗ +{this_week} vs last week"
+    diff = this_week - last_week
+    if diff > 0:
+        return f"↗ +{diff} vs last week"
+    if diff < 0:
+        return f"↘ −{abs(diff)} vs last week"
+    return "→ same as last week"
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _exercise_count() -> int:
+    """Real size of the Exercise Library catalog (0 when unavailable)."""
+    try:
+        from storage import get_exercises_collection
+
+        coll = get_exercises_collection()
+        return int(coll.count_documents({})) if coll is not None else 0
+    except Exception:
+        return 0
+
+
+def _today_checklist() -> list[dict]:
+    """Today's status rows derived strictly from stored/derived state."""
+    today_iso = date.today().isoformat()
+    workout_done = any(str(s.get("date") or "")[:10] == today_iso for s in _workout_sessions())
+    meals_done = any(
+        (e.get("date") in (None, "", today_iso))
+        for e in (st.session_state.get("tracker_entries") or [])
+    )
+    checkin_done = bool(st.session_state.get("checkin_done_today"))
+    goal_set = bool(st.session_state.get("calorie_goal_manual")) or bool(
+        st.session_state.get("calorie_goal_auto")
+    )
+    streak = int(st.session_state.get("streak_days") or 0)
+    return [
+        {"label": "Complete today's workout", "done": workout_done},
+        {"label": "Log your meals", "done": meals_done},
+        {"label": "Daily check-in", "done": checkin_done},
+        {
+            "label": "Set your calorie goal",
+            "done": goal_set,
+            "hint": f"{streak}-day streak" if streak else "",
+        },
+    ]
 
 
 def _calories_logged() -> float:
@@ -291,65 +358,81 @@ def _plan_image_html(plan: dict) -> str:
     return '<div class="media-fallback">No image</div>'
 
 
+def _render_user_chip(display_name: str) -> None:
+    """Topbar account chip (avatar initial + name) -> Profile. Fully clickable."""
+    initial = (display_name[:1] or "U").upper()
+    st.markdown(
+        '<div class="topbar-user-wrapper"><div class="topbar-user">'
+        f'<div class="topbar-avatar">{initial}</div>'
+        f'<div class="topbar-user-name">{display_name}</div>'
+        f'<div class="topbar-chevron">{icon("chevron-down")}</div>'
+        '</div></div>',
+        unsafe_allow_html=True,
+    )
+    st.button(display_name or "Profile", key="home_user_chip", on_click=lambda: _navigate(PAGE_PROFILE))
+
+
 def render_home() -> None:
-    """Home dashboard: greeting, actions, stats, main grid, banner."""
+    """Home dashboard: hero, real stats, shortcuts, today, activity, goals."""
     hour = datetime.now().hour
     part = "morning" if hour < 12 else "afternoon" if hour < 18 else "evening"
     name = _greeting_name()
-    greeting = f"Good {part}, {name}" if name else f"Good {part}"
+    greeting = f"Good {part},{f' {name}' if name else ''}"
 
-    # ── Top bar: search + notifications ──
-    st.markdown('<div class="topbar-row"></div>', unsafe_allow_html=True)
-    bar = st.columns([2.2, 1.4, 0.18], gap="small")
-    with bar[1]:
+    # Top bar: search left, notifications + account chip right
+    bar = st.columns([2.6, 0.16, 0.95], gap="small")
+    with bar[0]:
         st.markdown('<div class="search-wrap">', unsafe_allow_html=True)
         st.text_input(
             "Search",
             key="home_search",
             label_visibility="collapsed",
-            placeholder="Search exercises, meals, or ask anything…",
+            placeholder="Search workouts, exercises, meals, or ask anything…",
         )
         st.markdown('</div>', unsafe_allow_html=True)
-    with bar[2]:
+    with bar[1]:
         _notifications()
+    with bar[2]:
+        _render_user_chip(name or "Profile")
 
-    greeting_header(greeting, "Ready for your next session?", date.today().strftime("%A, %d %b %Y"))
-
-    # ── Primary action cards ──
-    st.markdown('<div class="pos-row"></div>', unsafe_allow_html=True)
-    cards = st.columns(2, gap="medium")
-    with cards[0]:
-        action_card(
-            "Start Workout",
-            "Continue or create a new session",
-            "play",
-            variant="primary",
-            key="home_start_workout",
-            on_click=lambda: _navigate(PAGE_WORKOUTS),
+    # Hero welcome card with primary quick actions
+    with st.container(border=True):
+        home_hero(
+            greeting,
+            "Consistency today builds a stronger tomorrow.",
+            "Small steps every day make big results.",
         )
-    with cards[1]:
-        action_card(
-            "Log Meal",
-            "Track your nutrition",
-            "diet",
-            variant="secondary",
-            key="home_log_meal",
-            on_click=lambda: _navigate(PAGE_MEAL_ANALYSER),
-        )
+        hero_cols = st.columns([1, 1, 2.4], gap="small")
+        with hero_cols[0]:
+            st.button(
+                "Start Workout",
+                key="home_start_workout",
+                type="primary",
+                use_container_width=True,
+                on_click=lambda: _navigate(PAGE_WORKOUTS),
+            )
+        with hero_cols[1]:
+            st.button(
+                "View Plan",
+                key="home_view_plan",
+                use_container_width=True,
+                on_click=lambda: _navigate(PAGE_WORKOUTS),
+            )
 
-    # ── Statistics bar (real data only) ──
-    week = _workouts_this_week()
+    # Statistics row (real data only)
+    sessions = _workout_sessions()
+    week = _workouts_this_week(sessions)
+    last_week = _workouts_last_week(sessions)
     calories = _calories_logged()
     goal = int(st.session_state.get("calorie_goal") or 2000)
     streak = int(st.session_state.get("streak_days") or 0)
-    sessions = _workout_sessions()
     stat_strip([
         {
             "label": "Workouts this week",
             "value": str(week),
             "icon": "workout",
             "tone": "green",
-            "hint": "↗ +3 vs last week" if week > 0 else "last 7 days",
+            "hint": _workout_delta_hint(week, last_week),
         },
         {
             "label": "Calories logged",
@@ -368,33 +451,104 @@ def render_home() -> None:
         },
         {
             "label": "Avg. workout time",
-            "value": "48" if sessions else "—",
+            "value": "—",
             "icon": "trend",
             "tone": "green",
             "hint": "minutes",
         },
     ])
 
-    # ── Main content grid: 67% main / 33% side ──
+    # Main grid: shortcuts left / side panels right
     st.markdown('<div class="dash-grid"></div>', unsafe_allow_html=True)
     grid = st.columns([0.67, 0.33], gap="large")
 
     with grid[0]:
-        _render_current_plan()
-        gap(1.1)
-        _render_quick_access()
+        panel_header(
+            "Your journey",
+            action_label="View all →",
+            action_key="home_journey_all",
+            on_action=lambda: _navigate(PAGE_WORKOUTS),
+        )
+        journey = st.columns(3, gap="medium")
+        with journey[0]:
+            feature_tile(
+                "Workouts",
+                "Start or continue your training session.",
+                "workout",
+                tone="green",
+                key="home_journey_workouts",
+                on_click=lambda: _navigate(PAGE_WORKOUTS),
+            )
+        with journey[1]:
+            count = _exercise_count()
+            feature_tile(
+                "Exercise Library",
+                "Browse and search every exercise.",
+                "library",
+                tone="blue",
+                key="home_journey_library",
+                on_click=lambda: _navigate(PAGE_EXERCISE_LIBRARY),
+                meta=f"{count} exercises" if count else "",
+            )
+        with journey[2]:
+            feature_tile(
+                "AI Gym Trainer",
+                "Get personalised workout guidance.",
+                "trainer",
+                tone="violet",
+                key="home_journey_trainer",
+                on_click=lambda: _navigate(PAGE_TRAINER),
+            )
+
+        gap(0.9)
+        panel_header(
+            "Nutrition tools",
+            action_label="View all →",
+            action_key="home_nutrition_all",
+            on_action=lambda: _navigate(PAGE_DIET),
+        )
+        nutrition = st.columns(3, gap="medium")
+        with nutrition[0]:
+            feature_tile(
+                "Diet Coach",
+                "Get personalised diet plans and advice.",
+                "diet",
+                tone="amber",
+                key="home_nutrition_diet",
+                on_click=lambda: _navigate(PAGE_DIET),
+            )
+        with nutrition[1]:
+            feature_tile(
+                "Meal Analyser",
+                "Analyse any meal and see its nutrition.",
+                "meal",
+                tone="rose",
+                key="home_nutrition_meal",
+                on_click=lambda: _navigate(PAGE_MEAL_ANALYSER),
+            )
+        with nutrition[2]:
+            feature_tile(
+                "Calorie Tracker",
+                "Track your daily intake and what's left.",
+                "calories",
+                tone="teal",
+                key="home_nutrition_tracker",
+                on_click=lambda: _navigate(PAGE_CALORIE_TRACKER),
+                meta=f"{int(calories):,} / {goal:,} kcal today",
+            )
+
+        # Current plan panel only when a routine actually exists.
+        if _current_plan():
+            gap(0.9)
+            _render_current_plan()
 
     with grid[1]:
+        with st.container(border=True):
+            home_today(date.today().strftime("%A, %d %b %Y"), _today_checklist())
+        gap(1.1)
         _render_recent_activity()
         gap(1.1)
         _render_goals()
-
-    motivation_banner(
-        "Consistency builds results",
-        "Keep showing up. Your future self will thank you.",
-        "Discipline today, stronger tomorrow.",
-        "assets/hero.jpg",
-    )
 
 
 def _notifications() -> None:
@@ -416,34 +570,17 @@ def _notifications() -> None:
 
 
 def _render_current_plan() -> None:
-    """Current plan panel: saved routine or a deliberate empty state."""
+    """Current plan panel — rendered only when a saved routine exists."""
+    plan = _current_plan()
+    if not plan:
+        return
+
     panel_header(
         "Your current plan",
         action_label="View all routines →",
         action_key="home_view_routines",
         on_action=lambda: _navigate(PAGE_WORKOUTS),
     )
-
-    plan = _current_plan()
-    if not plan:
-        with st.container(border=True):
-            st.markdown(
-                '<div class="empty-state" style="border:none;background:transparent;padding:1.1rem 0.4rem">'
-                '<div class="empty-title">No routine saved yet</div>'
-                '<div class="empty-desc">Build a training routine from the Exercise Library and it will show up here.</div>'
-                '</div>',
-                unsafe_allow_html=True,
-            )
-            col = st.columns([1, 2, 1])
-            with col[1]:
-                st.button(
-                    "Create workout",
-                    key="home_create_workout",
-                    type="primary",
-                    use_container_width=True,
-                    on_click=lambda: _navigate(PAGE_WORKOUTS),
-                )
-        return
 
     with st.container(border=True):
         media_col, body_col, act_col = st.columns([1.1, 2.2, 1.4], gap="medium")
